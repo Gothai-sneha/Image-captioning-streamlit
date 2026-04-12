@@ -2,31 +2,63 @@ import streamlit as st
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
-from PIL import Image
-import pickle
-import os
-import re
 from torchvision import models
+from PIL import Image
+import pandas as pd
+from collections import Counter
+import re
+import os
 
 # -----------------------------
-# Streamlit page config
+# Streamlit Config
 # -----------------------------
-st.set_page_config(page_title="Emotion Enriched Image Captioning", layout="centered")
-st.title("🖼️ Emotion-Enriched Image Caption Generator")
+st.set_page_config(page_title="Emotion Enriched Captioning", layout="centered")
+st.title("🖼️ Emotion Enriched Image Caption Generator")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# -----------------------------
+# Build Vocabulary from CSV
+# -----------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(BASE_DIR, "captions.csv")
+
+def build_vocab(csv_file):
+    df = pd.read_csv(csv_file)
+    counter = Counter()
+
+    for caption in df["caption"]:
+        words = re.findall(r"\w+", str(caption).lower())
+        counter.update(words)
+
+    word_map = {
+        "<pad>": 0,
+        "<start>": 1,
+        "<end>": 2,
+        "<unk>": 3
+    }
+
+    idx = 4
+    for word in counter.keys():
+        word_map[word] = idx
+        idx += 1
+
+    return word_map
+
+word_map = build_vocab(CSV_PATH)
+idx2word = {v: k for k, v in word_map.items()}
 
 # -----------------------------
 # Encoder
 # -----------------------------
 class EncoderCNN(nn.Module):
     def __init__(self, embed_size=256):
-        super(EncoderCNN, self).__init__()
+        super().__init__()
         resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
         modules = list(resnet.children())[:-1]
         self.resnet = nn.Sequential(*modules)
         self.linear = nn.Linear(resnet.fc.in_features, embed_size)
-        self.bn = nn.BatchNorm1d(embed_size, momentum=0.01)
+        self.bn = nn.BatchNorm1d(embed_size)
 
     def forward(self, images):
         with torch.no_grad():
@@ -36,21 +68,14 @@ class EncoderCNN(nn.Module):
         return features.unsqueeze(1)
 
 # -----------------------------
-# Decoder with Attention
+# Decoder
 # -----------------------------
 class DecoderRNN(nn.Module):
-    def __init__(self, embed_size, hidden_size, vocab_size, num_layers=1):
-        super(DecoderRNN, self).__init__()
+    def __init__(self, embed_size, hidden_size, vocab_size):
+        super().__init__()
         self.embed = nn.Embedding(vocab_size, embed_size)
-        self.lstm = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True)
+        self.lstm = nn.LSTM(embed_size, hidden_size, batch_first=True)
         self.linear = nn.Linear(hidden_size, vocab_size)
-
-    def forward(self, features, captions):
-        embeddings = self.embed(captions)
-        inputs = torch.cat((features, embeddings), 1)
-        hiddens, _ = self.lstm(inputs)
-        outputs = self.linear(hiddens)
-        return outputs
 
     def sample(self, features, states=None, max_len=20):
         sampled_ids = []
@@ -66,33 +91,24 @@ class DecoderRNN(nn.Module):
         return sampled_ids
 
 # -----------------------------
-# Load vocabulary
-# -----------------------------
-with open("word_map.pkl", "rb") as f:
-    word_map = pickle.load(f)
-
-idx2word = {v: k for k, v in word_map.items()}
-
-# -----------------------------
-# Load models
+# Load Models
 # -----------------------------
 @st.cache_resource
 def load_models():
     encoder = EncoderCNN(256).to(device)
     decoder = DecoderRNN(256, 512, len(word_map)).to(device)
 
-    encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
-    decoder.load_state_dict(torch.load("decoder.pth", map_location=device))
+    encoder.load_state_dict(torch.load(os.path.join(BASE_DIR, "encoder.pth"), map_location=device))
+    decoder.load_state_dict(torch.load(os.path.join(BASE_DIR, "decoder.pth"), map_location=device))
 
     encoder.eval()
     decoder.eval()
-
     return encoder, decoder
 
 encoder, decoder = load_models()
 
 # -----------------------------
-# Image transform
+# Image Transform
 # -----------------------------
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -104,7 +120,7 @@ transform = transforms.Compose([
 ])
 
 # -----------------------------
-# Generate caption
+# Generate Caption
 # -----------------------------
 def generate_caption(image):
     image = transform(image).unsqueeze(0).to(device)
@@ -123,57 +139,39 @@ def generate_caption(image):
 
     caption = " ".join(words)
     caption = caption.capitalize()
-    caption = re.sub(r"\s+", " ", caption).strip()
-
     return caption
 
 # -----------------------------
-# Emotion prediction
+# Predict Emotion
 # -----------------------------
 def predict_emotion(caption):
     caption = caption.lower()
 
-    if any(word in caption for word in ["running", "jumping", "playing", "flying"]):
+    if any(word in caption for word in ["running", "jumping", "playing"]):
         return "excited"
     elif any(word in caption for word in ["sleeping", "resting", "sitting"]):
         return "peaceful"
-    elif any(word in caption for word in ["crying", "alone", "dark"]):
+    elif any(word in caption for word in ["crying", "alone"]):
         return "sad"
     else:
         return "happy"
 
 # -----------------------------
-# Human-like emotion integration
-# -----------------------------
-def enrich_caption(caption, emotion):
-    caption = caption.rstrip(".")
-
-    emotion_phrases = {
-        "happy": "with a joyful vibe",
-        "sad": "in a sorrowful moment",
-        "excited": "in an excited moment",
-        "peaceful": "in a peaceful moment"
-    }
-
-    phrase = emotion_phrases.get(emotion, f"in a {emotion} moment")
-    return f"{caption} {phrase}."
-
-# -----------------------------
-# Upload image
+# Streamlit Upload
 # -----------------------------
 uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
-if uploaded_file is not None:
+if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
     with st.spinner("Generating caption..."):
         caption = generate_caption(image)
         emotion = predict_emotion(caption)
-        final_caption = enrich_caption(caption, emotion)
 
-    st.subheader("✨ Generated Output")
-    st.success(final_caption)
+        # EXACT COLAB FORMAT
+        emotion_caption = f"{emotion.capitalize()} {caption} ."
 
-    st.subheader("🎭 Predicted Emotion")
-    st.info(emotion.capitalize())
+    st.subheader("Generated Output")
+    st.write(f'**Emotion Enriched Caption:** "{emotion_caption}"')
+    st.write(f"**Predicted Emotion:** {emotion}")
