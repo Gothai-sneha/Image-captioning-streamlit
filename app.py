@@ -3,9 +3,11 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 import torchvision.models as models
+from torchvision.models import ResNet50_Weights
 from PIL import Image
 import pickle
 import os
+import gdown
 
 # =========================
 # PAGE CONFIG
@@ -16,18 +18,37 @@ st.title("Emotion Enriched Image Captioning")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # =========================
+# GOOGLE DRIVE MODEL DOWNLOAD
+# =========================
+ENCODER_FILE_ID = "1CYccQ7JxBCJL_unbXTgtwCe4dLwEENUb"
+DECODER_FILE_ID = "1Sbu7VVU0kWH93l7z8-VCP8e4Y6f-IXYH"
+
+def download_models():
+    if not os.path.exists("encoder.pth"):
+        with st.spinner("Downloading encoder model..."):
+            gdown.download(
+                f"https://drive.google.com/uc?id={ENCODER_FILE_ID}",
+                "encoder.pth",
+                quiet=False
+            )
+
+    if not os.path.exists("decoder.pth"):
+        with st.spinner("Downloading decoder model..."):
+            gdown.download(
+                f"https://drive.google.com/uc?id={DECODER_FILE_ID}",
+                "decoder.pth",
+                quiet=False
+            )
+
+# =========================
 # LOAD VOCAB
 # =========================
-class Vocabulary:
-    def __init__(self):
-        self.itos = {0: "<PAD>", 1: "<SOS>", 2: "<EOS>", 3: "<UNK>"}
-        self.stoi = {v: k for k, v in self.itos.items()}
+@st.cache_resource
+def load_vocab():
+    with open("vocab.pkl", "rb") as f:
+        return pickle.load(f)
 
-    def __len__(self):
-        return len(self.itos)
-
-with open("vocab.pkl", "rb") as f:
-    vocab = pickle.load(f)
+vocab = load_vocab()
 
 # =========================
 # EMOTION LABELS
@@ -40,7 +61,7 @@ emotion_classes = ["happy", "sad", "peaceful", "excited", "neutral"]
 class EncoderCNN(nn.Module):
     def __init__(self):
         super().__init__()
-        resnet = models.resnet50(weights="IMAGENET1K_V1")
+        resnet = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
         self.resnet = nn.Sequential(*list(resnet.children())[:-1])
 
     def forward(self, images):
@@ -67,16 +88,24 @@ class DecoderRNN(nn.Module):
         return self.fc(self.dropout(lstm_out)), self.emotion_fc(encoder_out)
 
 # =========================
-# LOAD MODEL
+# LOAD MODELS (CACHED)
 # =========================
-encoder = EncoderCNN().to(device)
-decoder = DecoderRNN(256, 512, len(vocab)).to(device)
+@st.cache_resource
+def load_models():
+    download_models()
 
-encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
-decoder.load_state_dict(torch.load("decoder.pth", map_location=device))
+    encoder = EncoderCNN().to(device)
+    decoder = DecoderRNN(256, 512, len(vocab)).to(device)
 
-encoder.eval()
-decoder.eval()
+    encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
+    decoder.load_state_dict(torch.load("decoder.pth", map_location=device))
+
+    encoder.eval()
+    decoder.eval()
+
+    return encoder, decoder
+
+encoder, decoder = load_models()
 
 # =========================
 # IMAGE PREPROCESS
@@ -92,13 +121,13 @@ transform = transforms.Compose([
 # CLEAN CAPTION
 # =========================
 def refine_caption(c):
-    c = c.strip().replace(" .", ".").replace("..", ".").rstrip(".")
+    c = c.strip().replace(" .", ".").replace("..", ".")
     words = [w for w in c.split() if w not in ["<unk>", "<pad>"]]
     sentence = " ".join(words).capitalize()
-    return sentence + "."
+    return sentence
 
 # =========================
-# EMOTION PREDICTION (MODEL)
+# EMOTION PREDICTION
 # =========================
 def predict_emotion(image):
     image = transform(image).unsqueeze(0).to(device)
@@ -115,16 +144,14 @@ def predict_emotion(image):
 def refine_emotion(caption, model_emotion, confidence):
     text = caption.lower()
 
-    # Trust model if confident
     if confidence > 0.6:
         return model_emotion
 
-    # Caption-based correction
-    if any(w in text for w in ["jump", "running", "catch", "play"]):
+    if any(w in text for w in ["jump", "running", "play"]):
         return "excited"
     elif any(w in text for w in ["smile", "laugh"]):
         return "happy"
-    elif any(w in text for w in ["sit", "calm", "lake"]):
+    elif any(w in text for w in ["sit", "calm"]):
         return "peaceful"
     elif any(w in text for w in ["alone", "cry"]):
         return "sad"
@@ -132,7 +159,7 @@ def refine_emotion(caption, model_emotion, confidence):
     return "neutral"
 
 # =========================
-# SMART EMOTION INJECTION
+# EMOTION INJECTION
 # =========================
 def inject_emotion(caption, emotion):
     if emotion == "excited":
@@ -147,7 +174,7 @@ def inject_emotion(caption, emotion):
     return caption
 
 # =========================
-# BEAM SEARCH
+# BEAM SEARCH (FIXED)
 # =========================
 def generate_caption(image, beam_width=3, max_len=20):
     image = transform(image).unsqueeze(0).to(device)
@@ -155,37 +182,39 @@ def generate_caption(image, beam_width=3, max_len=20):
     with torch.no_grad():
         features = encoder(image)
 
-    sequences = [[[], 0.0, None]]
+        sequences = [[[], 0.0, None]]
 
-    for _ in range(max_len):
-        all_candidates = []
+        for _ in range(max_len):
+            all_candidates = []
 
-        for seq, score, hidden in sequences:
-            word = torch.tensor([[vocab.stoi["<SOS>"] if len(seq)==0 else seq[-1]]]).to(device)
+            for seq, score, hidden in sequences:
+                word = torch.tensor([[vocab.stoi["<SOS>"] if len(seq)==0 else seq[-1]]]).to(device)
 
-            emb = decoder.embedding(word)
-            inp = torch.cat((emb, features.unsqueeze(1)), dim=2)
+                emb = decoder.embedding(word)
+                inp = torch.cat((emb, features.unsqueeze(1)), dim=2)
 
-            output, new_hidden = decoder.lstm(inp, hidden)
-            output = decoder.fc(output.squeeze(1))
+                output, new_hidden = decoder.lstm(inp, hidden)
+                output = decoder.fc(output.squeeze(1))
 
-            log_probs = torch.log_softmax(output, dim=1)
-            topk = torch.topk(log_probs, beam_width)
+                log_probs = torch.log_softmax(output, dim=1)
+                topk = torch.topk(log_probs, beam_width)
 
-            for i in range(beam_width):
-                idx = topk.indices[0][i].item()
-                prob = topk.values[0][i].item()
-                all_candidates.append([seq+[idx], score-prob, new_hidden])
+                for i in range(beam_width):
+                    idx = topk.indices[0][i].item()
+                    prob = topk.values[0][i].item()
 
-        sequences = sorted(all_candidates, key=lambda x: x[1])[:beam_width]
+                    h = (new_hidden[0].clone(), new_hidden[1].clone())
+                    all_candidates.append([seq + [idx], score - prob, h])
 
-    words = []
-    for idx in sequences[0][0]:
-        word = vocab.itos.get(idx, "")
-        if word == "<EOS>":
-            break
-        if word not in ["<SOS>", "<PAD>"]:
-            words.append(word)
+            sequences = sorted(all_candidates, key=lambda x: x[1])[:beam_width]
+
+        words = []
+        for idx in sequences[0][0]:
+            word = vocab.itos.get(idx, "")
+            if word == "<EOS>":
+                break
+            if word not in ["<SOS>", "<PAD>"]:
+                words.append(word)
 
     return " ".join(words)
 
@@ -199,16 +228,19 @@ if file:
     st.image(img, use_container_width=True)
 
     if st.button("Generate Caption"):
-        raw = generate_caption(img)
-        refined = refine_caption(raw)
+        with st.spinner("Generating caption..."):
+            raw = generate_caption(img)
+            refined = refine_caption(raw)
 
-        model_emotion, conf = predict_emotion(img)
-        emotion = refine_emotion(refined, model_emotion, conf)
+            model_emotion, conf = predict_emotion(img)
+            emotion = refine_emotion(refined, model_emotion, conf)
 
-        if emotion != "neutral":
-            refined = inject_emotion(refined, emotion)
+            if emotion != "neutral":
+                refined = inject_emotion(refined, emotion)
 
-        final = refined.rstrip(".") + "."
+            final = refined.strip()
+            if not final.endswith("."):
+                final += "."
 
         st.success("Generated Caption:")
         st.write(final)
