@@ -7,8 +7,6 @@ from PIL import Image
 import pickle
 import gdown
 import os
-import spacy
-import subprocess
 
 # =========================
 # PAGE CONFIG
@@ -17,19 +15,6 @@ st.set_page_config(page_title="Emotion Enriched Image Captioning")
 st.title("Emotion Enriched Image Captioning")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# =========================
-# LOAD SPACY MODEL (AUTO FIX)
-# =========================
-@st.cache_resource
-def load_spacy():
-    try:
-        return spacy.load("en_core_web_sm")
-    except:
-        subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
-        return spacy.load("en_core_web_sm")
-
-nlp = load_spacy()
 
 # =========================
 # DOWNLOAD MODELS
@@ -117,19 +102,13 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# CLEAN
+# CLEAN + SIMPLE GRAMMAR FIX
 # =========================
-def clean_caption(c):
-    return c.strip().replace(" .", ".").replace("..", ".").rstrip(".")
-
-# =========================
-# GRAMMAR FIX
-# =========================
-def refine_caption(caption):
-    doc = nlp(caption)
-    words = [t.text for t in doc if t.text not in ["<unk>", "<pad>"]]
-    sent = " ".join(words).capitalize()
-    return sent if sent.endswith(".") else sent + "."
+def refine_caption(c):
+    c = c.strip().replace(" .", ".").replace("..", ".").rstrip(".")
+    words = [w for w in c.split() if w not in ["<unk>", "<pad>"]]
+    sentence = " ".join(words).capitalize()
+    return sentence + "."
 
 # =========================
 # EMOTION PREDICT
@@ -173,11 +152,10 @@ def inject_emotion(caption, emotion):
     return " ".join(new)
 
 # =========================
-# ATTENTION WORDS
+# SIMPLE ATTENTION WORDS
 # =========================
 def get_focus_words(caption):
-    doc = nlp(caption)
-    return [t.text for t in doc if t.pos_ in ["VERB", "ADV"]]
+    return [w for w in caption.split() if w.endswith("ing")]
 
 # =========================
 # BEAM SEARCH
@@ -229,8 +207,7 @@ if file:
 
     if st.button("Generate Caption"):
         raw = generate_caption(img)
-        clean = clean_caption(raw)
-        refined = refine_caption(clean)
+        refined = refine_caption(raw)
 
         emotion, conf = predict_emotion(img)
 
