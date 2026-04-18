@@ -142,23 +142,6 @@ def clean_caption(caption):
     return caption.capitalize() + "."
 
 # =========================
-# EMOTION POST-PROCESS
-# =========================
-def get_emotion_from_caption(caption):
-    text = caption.lower()
-
-    if any(word in text for word in ["smile", "laugh", "happy"]):
-        return "happy"
-    elif any(word in text for word in ["run", "jump", "play"]):
-        return "excited"
-    elif any(word in text for word in ["sit", "lake", "tree", "peace"]):
-        return "peaceful"
-    elif any(word in text for word in ["cry", "sad"]):
-        return "sad"
-    else:
-        return "neutral"
-
-# =========================
 # BEAM SEARCH CAPTION
 # =========================
 def generate_caption(image, beam_width=3, max_len=20):
@@ -208,7 +191,7 @@ def generate_caption(image, beam_width=3, max_len=20):
         if word not in ["<SOS>", "<PAD>"]:
             words.append(word)
 
-    return " ".join(words)
+    return " ".join(words), features  # return features for emotion
 
 # =========================
 # STREAMLIT UI
@@ -223,9 +206,14 @@ if uploaded_file:
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
     if st.button("Generate Caption"):
-        raw_caption = generate_caption(image)
+        raw_caption, features = generate_caption(image)
         final_caption = clean_caption(raw_caption)
-        emotion = get_emotion_from_caption(final_caption)
+
+        # ✅ FIXED: Use model-based emotion prediction
+        with torch.no_grad():
+            emotion_logits = decoder.emotion_fc(features)
+            emotion_idx = torch.argmax(emotion_logits, dim=1).item()
+            emotion = emotion_classes[emotion_idx]
 
         st.success(f"Caption: {final_caption}")
         st.info(f"Predicted Emotion: {emotion}")
