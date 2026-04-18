@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -5,6 +6,7 @@ import torchvision.transforms as transforms
 import torchvision.models as models
 from PIL import Image
 import pickle
+import os
 
 # =========================
 # PAGE CONFIG
@@ -13,6 +15,17 @@ st.set_page_config(page_title="Emotion Enriched Image Captioning")
 st.title("Emotion Enriched Image Captioning")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# =========================
+# VOCAB CLASS (FIX FOR PICKLE ERROR)
+# =========================
+class Vocabulary:
+    def __init__(self):
+        self.itos = {0: "<PAD>", 1: "<SOS>", 2: "<EOS>", 3: "<UNK>"}
+        self.stoi = {v: k for k, v in self.itos.items()}
+
+    def __len__(self):
+        return len(self.itos)
 
 # =========================
 # LOAD VOCAB
@@ -63,8 +76,13 @@ class DecoderRNN(nn.Module):
 encoder = EncoderCNN().to(device)
 decoder = DecoderRNN(256, 512, len(vocab)).to(device)
 
-encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
-decoder.load_state_dict(torch.load("decoder.pth", map_location=device))
+if not os.path.exists("encoder.pth"):
+    st.error("encoder.pth NOT FOUND")
+if not os.path.exists("decoder.pth"):
+    st.error("decoder.pth NOT FOUND")
+
+encoder.load_state_dict(torch.load("encoder.pth", map_location=device), strict=False)
+decoder.load_state_dict(torch.load("decoder.pth", map_location=device), strict=False)
 
 encoder.eval()
 decoder.eval()
@@ -86,7 +104,6 @@ def refine_caption(c):
     words = [w for w in c.split() if w not in ["<unk>", "<pad>", "<SOS>"]]
     sentence = " ".join(words).strip()
 
-    # Ensure simple verb structure
     if " is " not in sentence:
         sentence = sentence.replace("a ", "a person is ", 1)
 
@@ -218,3 +235,4 @@ if file:
         st.write(final)
 
         st.info(f"Emotion: {emotion} (confidence: {conf:.2f})")
+```
