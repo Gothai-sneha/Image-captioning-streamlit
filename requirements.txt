@@ -1,5 +1,7 @@
 streamlit
-tensorflow
-numpy
+torch
+torchvision
 pillow
-pickle-mixin
+nltk
+matplotlib
+gdown
