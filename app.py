@@ -5,7 +5,6 @@ import torchvision.transforms as transforms
 import torchvision.models as models
 from PIL import Image
 import pickle
-import gdown
 import os
 
 # =========================
@@ -17,19 +16,7 @@ st.title("Emotion Enriched Image Captioning")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # =========================
-# DOWNLOAD MODELS
-# =========================
-ENCODER_FILE_ID = "1CYccQ7JxBCJL_unbXTgtwCe4dLwEENUb"
-DECODER_FILE_ID = "1Sbu7VVU0kWH93l7z8-VCP8e4Y6f-IXYH"
-
-if not os.path.exists("encoder.pth"):
-    gdown.download(f"https://drive.google.com/uc?id={ENCODER_FILE_ID}", "encoder.pth", quiet=False)
-
-if not os.path.exists("decoder.pth"):
-    gdown.download(f"https://drive.google.com/uc?id={DECODER_FILE_ID}", "decoder.pth", quiet=False)
-
-# =========================
-# VOCAB
+# LOAD VOCAB
 # =========================
 class Vocabulary:
     def __init__(self):
@@ -92,7 +79,7 @@ encoder.eval()
 decoder.eval()
 
 # =========================
-# TRANSFORM
+# IMAGE PREPROCESS
 # =========================
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -102,7 +89,7 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# CLEAN + SIMPLE GRAMMAR FIX
+# CLEAN CAPTION
 # =========================
 def refine_caption(c):
     c = c.strip().replace(" .", ".").replace("..", ".").rstrip(".")
@@ -111,7 +98,7 @@ def refine_caption(c):
     return sentence + "."
 
 # =========================
-# EMOTION PREDICT
+# EMOTION PREDICTION (MODEL)
 # =========================
 def predict_emotion(image):
     image = transform(image).unsqueeze(0).to(device)
@@ -123,45 +110,48 @@ def predict_emotion(image):
     return emotion_classes[pred.item()], conf.item()
 
 # =========================
+# HYBRID EMOTION REFINEMENT
+# =========================
+def refine_emotion(caption, model_emotion, confidence):
+    text = caption.lower()
+
+    # Trust model if confident
+    if confidence > 0.6:
+        return model_emotion
+
+    # Caption-based correction
+    if any(w in text for w in ["jump", "running", "catch", "play"]):
+        return "excited"
+    elif any(w in text for w in ["smile", "laugh"]):
+        return "happy"
+    elif any(w in text for w in ["sit", "calm", "lake"]):
+        return "peaceful"
+    elif any(w in text for w in ["alone", "cry"]):
+        return "sad"
+
+    return "neutral"
+
+# =========================
 # SMART EMOTION INJECTION
 # =========================
 def inject_emotion(caption, emotion):
-    words = caption.split()
-
-    mapping = {
-        "excited": {"running": "running excitedly", "run": "run excitedly"},
-        "happy": {"smiling": "smiling happily"},
-        "sad": {"sitting": "sitting quietly"},
-        "peaceful": {"sitting": "sitting peacefully"}
-    }
-
-    if emotion not in mapping:
-        return caption
-
-    new = []
-    for w in words:
-        replaced = False
-        for k in mapping[emotion]:
-            if k in w.lower():
-                new.append(mapping[emotion][k])
-                replaced = True
-                break
-        if not replaced:
-            new.append(w)
-
-    return " ".join(new)
-
-# =========================
-# SIMPLE ATTENTION WORDS
-# =========================
-def get_focus_words(caption):
-    return [w for w in caption.split() if w.endswith("ing")]
+    if emotion == "excited":
+        return caption.replace("jumping", "jumping excitedly") \
+                      .replace("running", "running excitedly")
+    elif emotion == "happy":
+        return caption.replace("smiling", "smiling happily")
+    elif emotion == "peaceful":
+        return caption.replace("sitting", "sitting peacefully")
+    elif emotion == "sad":
+        return caption.replace("sitting", "sitting quietly")
+    return caption
 
 # =========================
 # BEAM SEARCH
 # =========================
 def generate_caption(image, beam_width=3, max_len=20):
     image = transform(image).unsqueeze(0).to(device)
+
     with torch.no_grad():
         features = encoder(image)
 
@@ -169,20 +159,23 @@ def generate_caption(image, beam_width=3, max_len=20):
 
     for _ in range(max_len):
         all_candidates = []
+
         for seq, score, hidden in sequences:
             word = torch.tensor([[vocab.stoi["<SOS>"] if len(seq)==0 else seq[-1]]]).to(device)
+
             emb = decoder.embedding(word)
             inp = torch.cat((emb, features.unsqueeze(1)), dim=2)
-            out, hidden = decoder.lstm(inp, hidden)
-            out = decoder.fc(out.squeeze(1))
 
-            log_probs = torch.log_softmax(out, dim=1)
+            output, new_hidden = decoder.lstm(inp, hidden)
+            output = decoder.fc(output.squeeze(1))
+
+            log_probs = torch.log_softmax(output, dim=1)
             topk = torch.topk(log_probs, beam_width)
 
             for i in range(beam_width):
                 idx = topk.indices[0][i].item()
                 prob = topk.values[0][i].item()
-                all_candidates.append([seq+[idx], score-prob, hidden])
+                all_candidates.append([seq+[idx], score-prob, new_hidden])
 
         sequences = sorted(all_candidates, key=lambda x: x[1])[:beam_width]
 
@@ -197,7 +190,7 @@ def generate_caption(image, beam_width=3, max_len=20):
     return " ".join(words)
 
 # =========================
-# UI
+# STREAMLIT UI
 # =========================
 file = st.file_uploader("Upload Image", ["jpg","png","jpeg"])
 
@@ -209,16 +202,15 @@ if file:
         raw = generate_caption(img)
         refined = refine_caption(raw)
 
-        emotion, conf = predict_emotion(img)
+        model_emotion, conf = predict_emotion(img)
+        emotion = refine_emotion(refined, model_emotion, conf)
 
-        if conf > 0.6 and emotion != "neutral":
+        if emotion != "neutral":
             refined = inject_emotion(refined, emotion)
 
         final = refined.rstrip(".") + "."
-        focus = get_focus_words(final)
 
         st.success("Generated Caption:")
         st.write(final)
 
         st.info(f"Emotion: {emotion} (confidence: {conf:.2f})")
-        st.write("Key Words:", focus)
