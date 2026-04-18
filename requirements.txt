@@ -1,5 +1,8 @@
-streamlit==1.33.0
-torch==2.0.0
-torchvision==0.15.1
-pillow==9.5.0
-gdown==4.7.1
+streamlit
+torch
+torchvision
+pillow
+nltk
+matplotlib
+gdown
+
