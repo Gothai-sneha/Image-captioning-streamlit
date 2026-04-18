@@ -30,8 +30,34 @@ class Vocabulary:
 # =========================
 # LOAD VOCAB
 # =========================
-with open("vocab.pkl", "rb") as f:
-    vocab = pickle.load(f)
+# =========================
+# SAFE VOCAB LOAD (FINAL FIX)
+# =========================
+class Vocabulary:
+    def __init__(self):
+        self.itos = {}
+        self.stoi = {}
+
+    def __len__(self):
+        return len(self.itos)
+
+def load_vocab():
+    with open("vocab.pkl", "rb") as f:
+        data = pickle.load(f)
+
+    vocab = Vocabulary()
+
+    # Case 1: saved as full object
+    if hasattr(data, "__dict__"):
+        vocab.__dict__.update(data.__dict__)
+
+    # Case 2: saved as dict
+    elif isinstance(data, dict):
+        vocab.__dict__.update(data)
+
+    return vocab
+
+vocab = load_vocab()
 
 # =========================
 # EMOTION LABELS
