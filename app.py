@@ -1,187 +1,157 @@
 import streamlit as st
-import torch
-import torch.nn as nn
-import torchvision.transforms as transforms
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 from PIL import Image
 import pickle
-import torch.nn.functional as F
+import random
 
-# =========================
-# LOAD DEVICE
-# =========================
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# -------------------------------
+# Load Models & Tokenizer
+# -------------------------------
+@st.cache_resource
+def load_models():
+    encoder = tf.keras.models.load_model("encoder_model.h5")
+    decoder = tf.keras.models.load_model("decoder_model.h5")
+    emotion_model = tf.keras.models.load_model("emotion_model.h5")
+    
+    with open("tokenizer.pkl", "rb") as f:
+        tokenizer = pickle.load(f)
+    
+    return encoder, decoder, emotion_model, tokenizer
 
-# =========================
-# LOAD VOCAB
-# =========================
-with open("vocab.pkl", "rb") as f:
-    vocab = pickle.load(f)
+# -------------------------------
+# Image Preprocessing
+# -------------------------------
+def preprocess_image(image):
+    image = image.resize((224, 224))
+    image = np.array(image) / 255.0
+    image = np.expand_dims(image, axis=0)
+    return image
 
-# =========================
-# MODEL CLASSES (SAME AS COLAB)
-# =========================
-class EncoderCNN(nn.Module):
-    def __init__(self):
-        super().__init__()
-        import torchvision.models as models
-        resnet = models.resnet50(weights="IMAGENET1K_V1")
-        modules = list(resnet.children())[:-1]
-        self.resnet = nn.Sequential(*modules)
+# -------------------------------
+# Beam Search Caption Generator
+# -------------------------------
+def beam_search_caption(model, image_features, tokenizer, max_length=34, beam_width=3):
+    start = tokenizer.word_index['startseq']
+    end = tokenizer.word_index['endseq']
 
-    def forward(self, images):
-        features = self.resnet(images)
-        features = features.view(features.size(0), -1)
-        return features
+    sequences = [[[], 0.0]]
 
-
-class DecoderRNN(nn.Module):
-    def __init__(self, embed_size, hidden_size, vocab_size):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.lstm = nn.LSTM(embed_size + 2048, hidden_size, batch_first=True)
-        self.fc = nn.Linear(hidden_size, vocab_size)
-
-    def forward(self, features, captions):
-        features = features.unsqueeze(1).repeat(1, captions.size(1), 1)
-        embeddings = self.embedding(captions)
-        inputs = torch.cat((embeddings, features), dim=2)
-        outputs, _ = self.lstm(inputs)
-        outputs = self.fc(outputs)
-        return outputs
-
-
-# =========================
-# LOAD MODELS
-# =========================
-embed_size = 256
-hidden_size = 512
-vocab_size = len(vocab)
-
-encoder = EncoderCNN().to(device)
-decoder = DecoderRNN(embed_size, hidden_size, vocab_size).to(device)
-
-encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
-decoder.load_state_dict(torch.load("decoder.pth", map_location=device))
-
-encoder.eval()
-decoder.eval()
-
-# =========================
-# IMAGE TRANSFORM
-# =========================
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
-    )
-])
-
-# =========================
-# BEAM SEARCH
-# =========================
-def generate_caption(image, beam_width=3, max_len=20):
-
-    image = transform(image).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        features = encoder(image)
-
-    beams = [([vocab.stoi["<SOS>"]], 0.0, None)]
-    completed = []
-
-    for _ in range(max_len):
+    for _ in range(max_length):
         all_candidates = []
+        for seq, score in sequences:
 
-        for seq, score, hidden in beams:
-            last_word = seq[-1]
-
-            if last_word == vocab.stoi["<EOS>"]:
-                completed.append((seq, score))
+            if len(seq) > 0 and seq[-1] == end:
+                all_candidates.append((seq, score))
                 continue
 
-            word_tensor = torch.tensor([[last_word]]).to(device)
-            embedding = decoder.embedding(word_tensor)
+            padded = pad_sequences([seq], maxlen=max_length)
+            preds = model.predict([image_features, padded], verbose=0)[0]
 
-            feature_expand = features.unsqueeze(1)
-            lstm_input = torch.cat((embedding, feature_expand), dim=2)
+            top_k = np.argsort(preds)[-beam_width:]
 
-            output, hidden_new = decoder.lstm(lstm_input, hidden)
-            output = decoder.fc(output.squeeze(1))
+            for idx in top_k:
+                prob = preds[idx]
+                new_seq = seq + [idx]
+                new_score = score - np.log(prob + 1e-10)
+                all_candidates.append((new_seq, new_score))
 
-            log_probs = F.log_softmax(output, dim=1)
-            top_probs, top_idxs = torch.topk(log_probs, beam_width)
+        ordered = sorted(all_candidates, key=lambda tup: tup[1])
+        sequences = ordered[:beam_width]
 
-            for i in range(beam_width):
-                next_word = top_idxs[0][i].item()
-                next_score = score + top_probs[0][i].item()
+    best_seq = sequences[0][0]
 
-                new_seq = seq + [next_word]
-                all_candidates.append((new_seq, next_score, hidden_new))
-
-        if len(all_candidates) == 0:
-            break
-
-        beams = sorted(all_candidates, key=lambda x: x[1]/len(x[0]), reverse=True)[:beam_width]
-
-    best_seq = beams[0][0]
-
-    words = []
+    caption = []
     for idx in best_seq:
-        word = vocab.itos[idx]
-        if word == "<EOS>":
+        word = tokenizer.index_word.get(idx)
+        if word == 'endseq':
             break
-        if word not in ["<SOS>", "<PAD>"]:
-            words.append(word)
+        if word != 'startseq':
+            caption.append(word)
+
+    return ' '.join(caption)
+
+# -------------------------------
+# Emotion Prediction
+# -------------------------------
+def predict_emotion(model, image_features):
+    preds = model.predict(image_features)[0]
+    emotions = ["happy", "sad", "angry", "excited", "neutral"]
+
+    idx = np.argmax(preds)
+    return emotions[idx], float(preds[idx])
+
+# -------------------------------
+# Emotion Injection
+# -------------------------------
+emotion_map = {
+    "happy": ["happily", "joyfully"],
+    "excited": ["excitedly", "energetically"],
+    "sad": ["sadly"],
+    "angry": ["angrily"],
+    "neutral": []
+}
+
+
+def inject_emotion(caption, emotion, confidence):
+    if confidence < 0.4 or emotion == "neutral":
+        return caption
+
+    words = caption.split()
+    emo_words = emotion_map.get(emotion, [])
+
+    if not emo_words:
+        return caption
+
+    word = random.choice(emo_words)
+    insert_pos = min(2, len(words))
+    words.insert(insert_pos, word)
 
     return " ".join(words)
 
-# =========================
-# CLEAN + EMOTION
-# =========================
-def clean_caption(caption):
-    words = caption.split()
-    cleaned = []
-    for w in words:
-        if not cleaned or cleaned[-1] != w:
-            cleaned.append(w)
-    return " ".join(cleaned)
+# -------------------------------
+# Caption Enhancement
+# -------------------------------
+def enhance_caption(caption):
+    caption = caption.replace("is doing", "performs")
+    caption = caption.replace("a person", "someone")
+    caption = caption.replace("a man", "a man")
+    caption = caption.replace("a woman", "a woman")
+    caption = caption.replace("a dog", "a dog")
+    caption = caption.replace("a cat", "a cat")
+    return caption.capitalize()
 
-def get_emotion(caption):
-    caption = caption.lower()
-    if any(w in caption for w in ["run","jump","race"]):
-        return "excited"
-    if any(w in caption for w in ["play","dog","ball"]):
-        return "playful"
-    if any(w in caption for w in ["sit","bench"]):
-        return "peaceful"
-    return "neutral"
+# -------------------------------
+# Streamlit UI
+# -------------------------------
+st.title("Emotion-Aware Image Caption Generator")
 
-def enrich_caption(caption, emotion):
-    if emotion == "neutral":
-        return caption.capitalize() + "."
-    return f"{emotion.capitalize()} {caption}."
+encoder, decoder, emotion_model, tokenizer = load_models()
 
-# =========================
-# STREAMLIT UI
-# =========================
-st.title("Emotion-Based Image Caption Generator")
+uploaded_file = st.file_uploader("Upload an Image", type=["jpg", "png", "jpeg"])
 
-file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
+if uploaded_file:
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption="Uploaded Image", use_column_width=True)
 
-if file:
-    image = Image.open(file).convert("RGB")
-    st.image(image, use_column_width=True)
+    processed = preprocess_image(image)
+    features = encoder.predict(processed)
 
-    caption = generate_caption(image)
-    caption = clean_caption(caption)
+    # Generate Caption
+    caption = beam_search_caption(decoder, features, tokenizer)
 
-    emotion = get_emotion(caption)
-    final_caption = enrich_caption(caption, emotion)
+    # Predict Emotion
+    emotion, confidence = predict_emotion(emotion_model, features)
 
-    st.subheader("Generated Caption")
+    # Inject Emotion
+    final_caption = inject_emotion(caption, emotion, confidence)
+
+    # Enhance
+    final_caption = enhance_caption(final_caption)
+
+    st.subheader("Generated Caption:")
     st.write(final_caption)
 
-    st.subheader("Emotion")
-    st.write(emotion)
+    st.subheader("Emotion:")
+    st.write(f"{emotion} (confidence: {confidence:.2f})")
