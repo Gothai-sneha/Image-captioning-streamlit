@@ -2,5 +2,6 @@ streamlit
 torch
 torchvision
 pillow
+nltk
+matplotlib
 gdown
-spacy
