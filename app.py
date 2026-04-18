@@ -2,7 +2,7 @@ import streamlit as st
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
-import torchvision.models as models
+from torchvision.models import resnet50, ResNet50_Weights
 from PIL import Image
 import pickle
 import gdown
@@ -37,7 +37,7 @@ if not os.path.exists("decoder.pth"):
     )
 
 # =========================
-# VOCAB CLASS (FOR PICKLE)
+# VOCAB CLASS
 # =========================
 class Vocabulary:
     def __init__(self, freq_threshold=2):
@@ -49,8 +49,12 @@ class Vocabulary:
         return len(self.itos)
 
 # =========================
-# LOAD VOCAB
+# LOAD VOCAB (SAFE)
 # =========================
+if not os.path.exists("vocab.pkl"):
+    st.error("vocab.pkl not found!")
+    st.stop()
+
 with open("vocab.pkl", "rb") as f:
     vocab = pickle.load(f)
 
@@ -60,12 +64,12 @@ with open("vocab.pkl", "rb") as f:
 emotion_classes = ["happy", "sad", "peaceful", "excited", "neutral"]
 
 # =========================
-# ENCODER (NOTEBOOK MATCH)
+# ENCODER
 # =========================
 class EncoderCNN(nn.Module):
     def __init__(self):
         super().__init__()
-        resnet = models.resnet50(weights="IMAGENET1K_V1")
+        resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
         modules = list(resnet.children())[:-1]
         self.resnet = nn.Sequential(*modules)
 
@@ -75,7 +79,7 @@ class EncoderCNN(nn.Module):
         return features
 
 # =========================
-# DECODER (NOTEBOOK MATCH)
+# DECODER
 # =========================
 class DecoderRNN(nn.Module):
     def __init__(self, embed_size, hidden_size, vocab_size, encoder_dim=2048):
@@ -103,20 +107,26 @@ class DecoderRNN(nn.Module):
         return predictions, emotion_pred
 
 # =========================
-# LOAD MODEL
+# LOAD MODEL (CACHED)
 # =========================
-embed_size = 256
-hidden_size = 512
-vocab_size = len(vocab)
+@st.cache_resource
+def load_models():
+    embed_size = 256
+    hidden_size = 512
+    vocab_size = len(vocab)
 
-encoder = EncoderCNN().to(device)
-decoder = DecoderRNN(embed_size, hidden_size, vocab_size).to(device)
+    encoder = EncoderCNN().to(device)
+    decoder = DecoderRNN(embed_size, hidden_size, vocab_size).to(device)
 
-encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
-decoder.load_state_dict(torch.load("decoder.pth", map_location=device))
+    encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
+    decoder.load_state_dict(torch.load("decoder.pth", map_location=device))
 
-encoder.eval()
-decoder.eval()
+    encoder.eval()
+    decoder.eval()
+
+    return encoder, decoder
+
+encoder, decoder = load_models()
 
 # =========================
 # IMAGE PREPROCESS
@@ -138,7 +148,7 @@ def clean_caption(caption):
     caption = caption.replace(" .", ".")
     caption = caption.replace("..", ".")
     if len(caption) == 0:
-        return "No caption generated."
+        return "Something is happening."
     return caption.capitalize() + "."
 
 # =========================
@@ -175,11 +185,22 @@ def generate_caption(image, beam_width=3, max_len=20):
             for i in range(beam_width):
                 word_idx = topk.indices[0][i].item()
                 prob = topk.values[0][i].item()
-                candidate = [seq + [word_idx], score - prob, hidden]
+
+                # clone hidden state
+                if hidden is not None:
+                    hidden_clone = (hidden[0].clone(), hidden[1].clone())
+                else:
+                    hidden_clone = None
+
+                candidate = [seq + [word_idx], score - prob, hidden_clone]
                 all_candidates.append(candidate)
 
         ordered = sorted(all_candidates, key=lambda x: x[1])
         sequences = ordered[:beam_width]
+
+        # stop early if all ended
+        if all(seq[-1] == vocab.stoi["<EOS>"] for seq, _, _ in sequences if len(seq) > 0):
+            break
 
     best_seq = sequences[0][0]
 
@@ -191,7 +212,10 @@ def generate_caption(image, beam_width=3, max_len=20):
         if word not in ["<SOS>", "<PAD>"]:
             words.append(word)
 
-    return " ".join(words), features  # return features for emotion
+    if len(words) == 0:
+        return "something is happening", features
+
+    return " ".join(words), features
 
 # =========================
 # STREAMLIT UI
@@ -201,19 +225,30 @@ uploaded_file = st.file_uploader(
     type=["jpg", "jpeg", "png"]
 )
 
+beam_width = st.sidebar.slider("Beam Width", 1, 5, 3)
+max_len = st.sidebar.slider("Max Caption Length", 10, 30, 20)
+
 if uploaded_file:
-    image = Image.open(uploaded_file).convert("RGB")
+    try:
+        image = Image.open(uploaded_file).convert("RGB")
+    except:
+        st.error("Invalid image file")
+        st.stop()
+
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
     if st.button("Generate Caption"):
-        raw_caption, features = generate_caption(image)
-        final_caption = clean_caption(raw_caption)
+        with st.spinner("Generating caption..."):
+            raw_caption, features = generate_caption(image, beam_width, max_len)
+            final_caption = clean_caption(raw_caption)
 
-        # ✅ FIXED: Use model-based emotion prediction
-        with torch.no_grad():
-            emotion_logits = decoder.emotion_fc(features)
-            emotion_idx = torch.argmax(emotion_logits, dim=1).item()
-            emotion = emotion_classes[emotion_idx]
+            with torch.no_grad():
+                emotion_logits = decoder.emotion_fc(features)
+                probs = torch.softmax(emotion_logits, dim=1)
+                emotion_idx = torch.argmax(probs, dim=1).item()
+                confidence = probs[0][emotion_idx].item()
+                emotion = emotion_classes[emotion_idx]
 
+        st.write("Raw Caption:", raw_caption)
         st.success(f"Caption: {final_caption}")
-        st.info(f"Predicted Emotion: {emotion}")
+        st.info(f"Predicted Emotion: {emotion} ({confidence:.2f})")
