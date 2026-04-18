@@ -7,6 +7,7 @@ from PIL import Image
 import pickle
 import gdown
 import os
+import spacy
 
 # =========================
 # PAGE CONFIG
@@ -17,24 +18,25 @@ st.title("Emotion Enriched Image Captioning")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # =========================
+# LOAD SPACY MODEL
+# =========================
+@st.cache_resource
+def load_spacy():
+    return spacy.load("en_core_web_sm")
+
+nlp = load_spacy()
+
+# =========================
 # GOOGLE DRIVE MODEL DOWNLOAD
 # =========================
 ENCODER_FILE_ID = "1CYccQ7JxBCJL_unbXTgtwCe4dLwEENUb"
 DECODER_FILE_ID = "1Sbu7VVU0kWH93l7z8-VCP8e4Y6f-IXYH"
 
 if not os.path.exists("encoder.pth"):
-    gdown.download(
-        f"https://drive.google.com/uc?id={ENCODER_FILE_ID}",
-        "encoder.pth",
-        quiet=False
-    )
+    gdown.download(f"https://drive.google.com/uc?id={ENCODER_FILE_ID}", "encoder.pth", quiet=False)
 
 if not os.path.exists("decoder.pth"):
-    gdown.download(
-        f"https://drive.google.com/uc?id={DECODER_FILE_ID}",
-        "decoder.pth",
-        quiet=False
-    )
+    gdown.download(f"https://drive.google.com/uc?id={DECODER_FILE_ID}", "decoder.pth", quiet=False)
 
 # =========================
 # VOCAB CLASS
@@ -83,14 +85,12 @@ class DecoderRNN(nn.Module):
 
         self.embedding = nn.Embedding(vocab_size, embed_size)
 
-        self.lstm = nn.LSTM(
-            embed_size + encoder_dim,
-            hidden_size,
-            batch_first=True
-        )
-
+        self.lstm = nn.LSTM(embed_size + encoder_dim, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, vocab_size)
+
+        # Emotion head
         self.emotion_fc = nn.Linear(encoder_dim, len(emotion_classes))
+
         self.dropout = nn.Dropout(0.5)
 
     def forward(self, encoder_out, captions):
@@ -135,25 +135,88 @@ transform = transforms.Compose([
 # =========================
 def clean_caption(caption):
     caption = caption.strip()
-    caption = caption.replace(" .", ".")
-    caption = caption.replace("..", ".")
+    caption = caption.replace(" .", ".").replace("..", ".")
     caption = caption.rstrip(".")
-    if len(caption) == 0:
-        return "No caption generated"
-    return caption.capitalize()
+    return caption
 
 # =========================
-# MODEL-BASED EMOTION
+# GRAMMAR REFINEMENT
+# =========================
+def refine_caption_grammar(caption):
+    doc = nlp(caption)
+    tokens = [token.text for token in doc if token.text not in ["<unk>", "<pad>"]]
+    sentence = " ".join(tokens).capitalize()
+
+    if not sentence.endswith("."):
+        sentence += "."
+
+    return sentence
+
+# =========================
+# EMOTION PREDICTION (MODEL)
 # =========================
 def predict_emotion(image):
     image = transform(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
         features = encoder(image)
-        emotion_logits = decoder.emotion_fc(features)
-        predicted = torch.argmax(emotion_logits, dim=1).item()
+        logits = decoder.emotion_fc(features)
+        probs = torch.softmax(logits, dim=1)
 
-    return emotion_classes[predicted]
+        confidence, predicted = torch.max(probs, dim=1)
+
+    return emotion_classes[predicted.item()], confidence.item()
+
+# =========================
+# EMOTION WORD INJECTION
+# =========================
+def emotion_word_injection(caption, emotion):
+    words = caption.split()
+
+    emotion_map = {
+        "excited": {
+            "run": "run excitedly",
+            "running": "running excitedly",
+            "jump": "jump energetically",
+            "play": "play joyfully"
+        },
+        "happy": {
+            "smile": "smile happily",
+            "walk": "walk cheerfully",
+            "play": "play happily"
+        },
+        "sad": {
+            "sit": "sit quietly",
+            "walk": "walk slowly"
+        },
+        "peaceful": {
+            "stand": "stand calmly",
+            "sit": "sit peacefully"
+        }
+    }
+
+    if emotion not in emotion_map:
+        return caption
+
+    new_words = []
+    for w in words:
+        replaced = False
+        for key in emotion_map[emotion]:
+            if key in w:
+                new_words.append(emotion_map[emotion][key])
+                replaced = True
+                break
+        if not replaced:
+            new_words.append(w)
+
+    return " ".join(new_words)
+
+# =========================
+# ATTENTION-LIKE KEYWORDS
+# =========================
+def highlight_emotion_focus(caption):
+    doc = nlp(caption)
+    return [token.text for token in doc if token.pos_ in ["VERB", "ADV"]]
 
 # =========================
 # BEAM SEARCH CAPTION
@@ -192,8 +255,7 @@ def generate_caption(image, beam_width=3, max_len=20):
                 candidate = [seq + [word_idx], score - prob, hidden]
                 all_candidates.append(candidate)
 
-        ordered = sorted(all_candidates, key=lambda x: x[1])
-        sequences = ordered[:beam_width]
+        sequences = sorted(all_candidates, key=lambda x: x[1])[:beam_width]
 
     best_seq = sequences[0][0]
 
@@ -210,10 +272,7 @@ def generate_caption(image, beam_width=3, max_len=20):
 # =========================
 # STREAMLIT UI
 # =========================
-uploaded_file = st.file_uploader(
-    "Upload an image",
-    type=["jpg", "jpeg", "png"]
-)
+uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
@@ -221,15 +280,22 @@ if uploaded_file:
 
     if st.button("Generate Caption"):
         raw_caption = generate_caption(image)
+
         clean_cap = clean_caption(raw_caption)
+        refined_cap = refine_caption_grammar(clean_cap)
 
-        emotion = predict_emotion(image)
+        emotion, confidence = predict_emotion(image)
 
-        # FINAL EMOTION ENRICHED CAPTION
-        emotion_word = emotion.capitalize()
-        final_caption = f"{emotion_word} {clean_cap}."
+        if confidence > 0.6 and emotion != "neutral":
+            refined_cap = emotion_word_injection(refined_cap, emotion)
 
-        st.success("Emotion Enriched Caption:")
+        final_caption = refined_cap.rstrip(".") + "."
+
+        focus_words = highlight_emotion_focus(final_caption)
+
+        st.success("Generated Caption:")
         st.write(final_caption)
 
-        st.info(f"Predicted Emotion: {emotion}")
+        st.info(f"Predicted Emotion: {emotion} (confidence: {confidence:.2f})")
+
+        st.write("Key Action Words (Attention Focus):", focus_words)
