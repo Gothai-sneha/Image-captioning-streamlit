@@ -1,4 +1,3 @@
-
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -38,7 +37,7 @@ if not os.path.exists("decoder.pth"):
     )
 
 # =========================
-# VOCAB CLASS (FOR PICKLE)
+# VOCAB CLASS
 # =========================
 class Vocabulary:
     def __init__(self, freq_threshold=2):
@@ -61,7 +60,7 @@ with open("vocab.pkl", "rb") as f:
 emotion_classes = ["happy", "sad", "peaceful", "excited", "neutral"]
 
 # =========================
-# ENCODER (NOTEBOOK MATCH)
+# ENCODER
 # =========================
 class EncoderCNN(nn.Module):
     def __init__(self):
@@ -76,7 +75,7 @@ class EncoderCNN(nn.Module):
         return features
 
 # =========================
-# DECODER (NOTEBOOK MATCH)
+# DECODER
 # =========================
 class DecoderRNN(nn.Module):
     def __init__(self, embed_size, hidden_size, vocab_size, encoder_dim=2048):
@@ -138,26 +137,23 @@ def clean_caption(caption):
     caption = caption.strip()
     caption = caption.replace(" .", ".")
     caption = caption.replace("..", ".")
+    caption = caption.rstrip(".")
     if len(caption) == 0:
-        return "No caption generated."
-    return caption.capitalize() + "."
+        return "No caption generated"
+    return caption.capitalize()
 
 # =========================
-# EMOTION POST-PROCESS
+# MODEL-BASED EMOTION
 # =========================
-def get_emotion_from_caption(caption):
-    text = caption.lower()
+def predict_emotion(image):
+    image = transform(image).unsqueeze(0).to(device)
 
-    if any(word in text for word in ["smile", "laugh", "happy"]):
-        return "happy"
-    elif any(word in text for word in ["run", "jump", "play"]):
-        return "excited"
-    elif any(word in text for word in ["sit", "lake", "tree", "peace"]):
-        return "peaceful"
-    elif any(word in text for word in ["cry", "sad"]):
-        return "sad"
-    else:
-        return "neutral"
+    with torch.no_grad():
+        features = encoder(image)
+        emotion_logits = decoder.emotion_fc(features)
+        predicted = torch.argmax(emotion_logits, dim=1).item()
+
+    return emotion_classes[predicted]
 
 # =========================
 # BEAM SEARCH CAPTION
@@ -225,8 +221,15 @@ if uploaded_file:
 
     if st.button("Generate Caption"):
         raw_caption = generate_caption(image)
-        final_caption = clean_caption(raw_caption)
-        emotion = get_emotion_from_caption(final_caption)
+        clean_cap = clean_caption(raw_caption)
 
-        st.success(f"Caption: {final_caption}")
+        emotion = predict_emotion(image)
+
+        # FINAL EMOTION ENRICHED CAPTION
+        emotion_word = emotion.capitalize()
+        final_caption = f"{emotion_word} {clean_cap}."
+
+        st.success("Emotion Enriched Caption:")
+        st.write(final_caption)
+
         st.info(f"Predicted Emotion: {emotion}")
