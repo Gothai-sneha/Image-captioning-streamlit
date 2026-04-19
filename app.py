@@ -80,31 +80,7 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# GRAMMAR CORRECTION LAYER
-# =========================
-def grammar_correction(sentence):
-    replacements = {
-        "a man is": "a man",
-        "a woman is": "a woman",
-        "a person is": "a person",
-        "is standing": "standing",
-        "is sitting": "sitting",
-        "is playing": "playing",
-        "is doing": "",
-        "are standing": "standing",
-        "are sitting": "sitting",
-        "on a a": "on a",
-        "in a a": "in a",
-        "with a a": "with a",
-    }
-
-    for k, v in replacements.items():
-        sentence = sentence.replace(k, v)
-
-    return sentence
-
-# =========================
-# CLEAN CAPTION
+# CLEAN + STRUCTURE CAPTION
 # =========================
 def refine_caption(caption):
     caption = caption.lower()
@@ -114,18 +90,27 @@ def refine_caption(caption):
     if not words:
         return "An image."
 
-    # remove consecutive duplicates
+    sentence = " ".join(words)
+
+    # Add proper grammar (is/are)
+    if sentence.startswith(("a ", "the ", "one ")):
+        sentence = sentence.replace(" running", " is running")
+        sentence = sentence.replace(" playing", " is playing")
+        sentence = sentence.replace(" sitting", " is sitting")
+        sentence = sentence.replace(" standing", " is standing")
+
+    if sentence.startswith(("two ", "three ", "many ")):
+        sentence = sentence.replace(" running", " are running")
+        sentence = sentence.replace(" playing", " are playing")
+        sentence = sentence.replace(" sitting", " are sitting")
+
+    # Remove duplicate words
     cleaned = []
-    for w in words:
+    for w in sentence.split():
         if not cleaned or cleaned[-1] != w:
             cleaned.append(w)
 
-    sentence = " ".join(cleaned)
-
-    # apply grammar correction
-    sentence = grammar_correction(sentence)
-
-    sentence = sentence.strip()
+    sentence = " ".join(cleaned).strip()
 
     if len(sentence.split()) < 3:
         sentence = "An image showing something"
@@ -140,7 +125,7 @@ def detect_emotion(caption):
 
     if "smiling" in text or "laughing" in text:
         return "happy"
-    elif "trick" in text or "jump" in text:
+    elif "running" in text or "playing" in text or "trick" in text:
         return "excited"
     elif "sitting" in text and ("lake" in text or "bench" in text):
         return "peaceful"
@@ -150,7 +135,7 @@ def detect_emotion(caption):
     return None
 
 # =========================
-# EMOTION INJECTION
+# INSERT EMOTION INTO SENTENCE
 # =========================
 def inject_emotion(caption, emotion):
     if emotion is None:
@@ -158,14 +143,16 @@ def inject_emotion(caption, emotion):
 
     caption = caption.rstrip(".")
 
-    if emotion == "excited":
-        return caption + " in an energetic moment."
-    elif emotion == "happy":
-        return caption + " with a smile."
-    elif emotion == "peaceful":
-        return caption + " in a calm setting."
-    elif emotion == "sad":
-        return caption + " in a sad moment."
+    if " is running" in caption:
+        caption = caption.replace(" is running", f" is running {emotion}ly")
+    elif " are running" in caption:
+        caption = caption.replace(" are running", f" are running {emotion}ly")
+    elif " is playing" in caption:
+        caption = caption.replace(" is playing", f" is playing {emotion}ly")
+    elif " are playing" in caption:
+        caption = caption.replace(" are playing", f" are playing {emotion}ly")
+    else:
+        caption = caption + f" {emotion}ly"
 
     return caption + "."
 
