@@ -83,7 +83,6 @@ transform = transforms.Compose([
 # CLEAN CAPTION
 # =========================
 def clean_caption(caption):
-
     words = caption.split()
 
     cleaned = []
@@ -120,6 +119,10 @@ def get_emotion_from_caption(caption):
     if any(w in text for w in ["cry", "sad", "alone", "lonely"]):
         return "sad"
 
+    # 🔥 NEW: TIRED DETECTION
+    if any(w in text for w in ["rest", "sleep", "lying", "exhausted", "tired"]):
+        return "tired"
+
     # fallback rules
     if "group of people" in text:
         return "happy"
@@ -141,14 +144,18 @@ def enrich_caption_with_emotion(caption, emotion):
 
     sentence = caption
 
-    # Fix grammar safely
+    # Fix grammar
     if " are " not in sentence:
         sentence = sentence.replace(" standing", " is standing") \
                            .replace(" running", " is running") \
                            .replace(" playing", " is playing") \
-                           .replace(" sitting", " is sitting")
+                           .replace(" sitting", " is sitting") \
+                           .replace(" lying", " is lying")
 
-    # Emotion → adverb
+    # Emotion handling
+    if emotion == "tired":
+        return sentence.capitalize() + " looking tired."
+
     emotion_map = {
         "happy": "happily",
         "excited": "excitedly",
@@ -169,6 +176,8 @@ def enrich_caption_with_emotion(caption, emotion):
             sentence = sentence.replace("playing", f"playing {emotion_word}")
         elif "sitting" in sentence:
             sentence = sentence.replace("sitting", f"sitting {emotion_word}")
+        elif "lying" in sentence:
+            sentence = sentence.replace("lying", f"lying {emotion_word}")
         else:
             sentence += f" {emotion_word}"
 
@@ -250,3 +259,4 @@ if file:
         st.write(f'"{final_caption}"')
 
         st.info(f"Predicted Emotion: {emotion}")
+
