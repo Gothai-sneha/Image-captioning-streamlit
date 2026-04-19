@@ -86,7 +86,6 @@ def clean_caption(caption):
 
     words = caption.split()
 
-    # Remove consecutive duplicates
     cleaned = []
     for word in words:
         if not cleaned or cleaned[-1] != word:
@@ -94,7 +93,6 @@ def clean_caption(caption):
 
     sentence = " ".join(cleaned)
 
-    # Remove repeated phrases like "group of people ... group of people"
     parts = sentence.split(" of ")
     if len(parts) > 2:
         sentence = " of ".join(parts[:2])
@@ -102,7 +100,7 @@ def clean_caption(caption):
     return sentence.strip().lower()
 
 # =========================
-# EMOTION DETECTION (IMPROVED)
+# EMOTION DETECTION
 # =========================
 def get_emotion_from_caption(caption):
     text = caption.lower()
@@ -122,7 +120,7 @@ def get_emotion_from_caption(caption):
     if any(w in text for w in ["cry", "sad", "alone", "lonely"]):
         return "sad"
 
-    # Smart fallback rules
+    # fallback rules
     if "group of people" in text:
         return "happy"
 
@@ -143,7 +141,7 @@ def enrich_caption_with_emotion(caption, emotion):
 
     sentence = caption
 
-    # Fix grammar
+    # Fix grammar safely
     if " are " not in sentence:
         sentence = sentence.replace(" standing", " is standing") \
                            .replace(" running", " is running") \
@@ -173,14 +171,6 @@ def enrich_caption_with_emotion(caption, emotion):
             sentence = sentence.replace("sitting", f"sitting {emotion_word}")
         else:
             sentence += f" {emotion_word}"
-
-    # Smart sentence enhancement
-    if "group of people" in sentence:
-        sentence += " enjoying time together"
-    elif "lake" in sentence:
-        sentence += " enjoying the view"
-    elif "park" in sentence:
-        sentence += " enjoying the surroundings"
 
     return sentence.capitalize() + "."
 
@@ -260,4 +250,3 @@ if file:
         st.write(f'"{final_caption}"')
 
         st.info(f"Predicted Emotion: {emotion}")
-
