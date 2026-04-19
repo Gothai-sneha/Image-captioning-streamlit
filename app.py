@@ -83,43 +83,56 @@ transform = transforms.Compose([
 # CLEAN CAPTION
 # =========================
 def clean_caption(caption):
-    words = caption.split()
-    cleaned = []
 
+    words = caption.split()
+
+    # Remove consecutive duplicates
+    cleaned = []
     for word in words:
-        if len(cleaned) == 0 or cleaned[-1] != word:
+        if not cleaned or cleaned[-1] != word:
             cleaned.append(word)
 
-    caption = " ".join(cleaned)
-    caption = caption.strip().rstrip(".").lower()
+    sentence = " ".join(cleaned)
 
-    return caption
+    # Remove repeated phrases like "group of people ... group of people"
+    parts = sentence.split(" of ")
+    if len(parts) > 2:
+        sentence = " of ".join(parts[:2])
+
+    return sentence.strip().lower()
 
 # =========================
-# EMOTION FROM CAPTION
+# EMOTION DETECTION (IMPROVED)
 # =========================
 def get_emotion_from_caption(caption):
     text = caption.lower()
 
-    if any(w in text for w in ["run", "jump", "race", "bike"]):
-        return "excited"
-
-    elif any(w in text for w in ["play", "child", "dog", "ball"]):
-        return "playful"
-
-    elif any(w in text for w in ["sit", "bench", "lake", "water"]):
-        return "peaceful"
-
-    elif any(w in text for w in ["smile", "laugh"]):
+    if any(w in text for w in ["smile", "laugh", "happy"]):
         return "happy"
 
-    elif any(w in text for w in ["cry", "sad"]):
+    if any(w in text for w in ["run", "jump", "race"]):
+        return "excited"
+
+    if any(w in text for w in ["play", "child", "dog", "ball"]):
+        return "playful"
+
+    if any(w in text for w in ["sit", "bench", "lake"]):
+        return "peaceful"
+
+    if any(w in text for w in ["cry", "sad", "alone", "lonely"]):
         return "sad"
+
+    # Smart fallback rules
+    if "group of people" in text:
+        return "happy"
+
+    if "people" in text and "standing" in text:
+        return "happy"
 
     return "neutral"
 
 # =========================
-# ENRICH CAPTION (FINAL STYLE)
+# ENRICH CAPTION
 # =========================
 def enrich_caption_with_emotion(caption, emotion):
 
@@ -128,16 +141,14 @@ def enrich_caption_with_emotion(caption, emotion):
     if len(caption.split()) < 3:
         return "An image showing something."
 
-    # Grammar fix
-    if caption.startswith(("a ", "an ", "the ", "one ")):
-        sentence = caption.replace(" running", " is running") \
-                          .replace(" playing", " is playing") \
-                          .replace(" sitting", " is sitting") \
-                          .replace(" standing", " is standing")
-    else:
-        sentence = caption.replace(" running", " are running") \
-                          .replace(" playing", " are playing") \
-                          .replace(" sitting", " are sitting")
+    sentence = caption
+
+    # Fix grammar
+    if " are " not in sentence:
+        sentence = sentence.replace(" standing", " is standing") \
+                           .replace(" running", " is running") \
+                           .replace(" playing", " is playing") \
+                           .replace(" sitting", " is sitting")
 
     # Emotion → adverb
     emotion_map = {
@@ -151,25 +162,27 @@ def enrich_caption_with_emotion(caption, emotion):
 
     emotion_word = emotion_map.get(emotion, "")
 
-    if emotion_word == "":
-        final = sentence
-    else:
-        if " is running" in sentence:
-            final = sentence.replace(" is running", f" is running {emotion_word}")
-        elif " are running" in sentence:
-            final = sentence.replace(" are running", f" are running {emotion_word}")
-        elif " is playing" in sentence:
-            final = sentence.replace(" is playing", f" is playing {emotion_word}")
-        elif " are playing" in sentence:
-            final = sentence.replace(" are playing", f" are playing {emotion_word}")
-        elif " is sitting" in sentence:
-            final = sentence.replace(" is sitting", f" is sitting {emotion_word}")
-        elif " are sitting" in sentence:
-            final = sentence.replace(" are sitting", f" are sitting {emotion_word}")
+    if emotion_word:
+        if "standing" in sentence:
+            sentence = sentence.replace("standing", f"standing {emotion_word}")
+        elif "running" in sentence:
+            sentence = sentence.replace("running", f"running {emotion_word}")
+        elif "playing" in sentence:
+            sentence = sentence.replace("playing", f"playing {emotion_word}")
+        elif "sitting" in sentence:
+            sentence = sentence.replace("sitting", f"sitting {emotion_word}")
         else:
-            final = sentence + f" {emotion_word}"
+            sentence += f" {emotion_word}"
 
-    return final.capitalize().strip() + "."
+    # Smart sentence enhancement
+    if "group of people" in sentence:
+        sentence += " enjoying time together"
+    elif "lake" in sentence:
+        sentence += " enjoying the view"
+    elif "park" in sentence:
+        sentence += " enjoying the surroundings"
+
+    return sentence.capitalize() + "."
 
 # =========================
 # BEAM SEARCH
@@ -247,3 +260,4 @@ if file:
         st.write(f'"{final_caption}"')
 
         st.info(f"Predicted Emotion: {emotion}")
+
