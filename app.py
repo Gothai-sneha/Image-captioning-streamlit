@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -226,4 +226,3 @@ if file:
         st.write(final)
 
         st.info(f"Predicted Emotion: {emotion}")
-```
