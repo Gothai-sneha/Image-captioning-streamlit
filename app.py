@@ -1,4 +1,3 @@
-
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -73,68 +72,48 @@ transform = transforms.Compose([
 # CAPTION REFINEMENT
 # =========================
 def refine_caption(caption):
-    words = caption.lower().split()
+    caption = caption.lower().replace(".", "")
 
-    # remove unwanted tokens
-    words = [w for w in words if w not in ["<unk>", "<pad>", "<sos>", "<eos>"]]
+    words = [w for w in caption.split() if w not in ["<unk>", "<pad>", "<sos>"]]
 
     if not words:
         return "An image."
 
-    # remove duplicates
+    sentence = " ".join(words)
+
+    # remove duplicate consecutive words
     cleaned = []
-    for w in words:
+    for w in sentence.split():
         if not cleaned or cleaned[-1] != w:
             cleaned.append(w)
 
-    words = cleaned
+    sentence = " ".join(cleaned)
 
-    subject = words[0]
-    is_plural = subject.endswith("s")
-
-    if is_plural:
-        subject_part = "Two " + subject
-        verb = "are"
-    else:
-        article = "An" if subject[0] in "aeiou" else "A"
-        subject_part = f"{article} {subject}"
-        verb = "is"
-
-    actions = [
+    # detect verbs
+    verbs = [
         "running", "playing", "sitting", "standing",
-        "walking", "jumping", "riding", "eating",
-        "drinking", "holding", "catching"
+        "walking", "jumping", "catching", "holding",
+        "riding", "eating", "drinking", "climbing"
     ]
 
-    action_word = None
-    for w in words:
-        if w in actions:
-            action_word = w
-            break
+    has_verb = any(v in sentence for v in verbs)
 
-    if action_word:
-        sentence = f"{subject_part} {verb} {action_word}"
-        remaining = [w for w in words if w != subject and w != action_word]
+    # add action only if missing
+    if not has_verb:
+        if "ball" in sentence or "frisbee" in sentence:
+            sentence += " is playing"
+        elif "dog" in sentence:
+            sentence += " is standing"
+        elif "person" in sentence or "man" in sentence or "woman" in sentence:
+            sentence += " is standing"
+        else:
+            sentence += " is present"
 
-        phrase_map = {
-            "ball": "with a ball",
-            "frisbee": "with a frisbee",
-            "bike": "on a bike",
-            "skateboard": "on a skateboard",
-            "grass": "on grass",
-            "park": "in a park"
-        }
+    # fix plural grammar
+    if sentence.startswith(("two ", "three ", "many ")):
+        sentence = sentence.replace(" is ", " are ")
 
-        enhanced = []
-        for w in remaining:
-            enhanced.append(phrase_map.get(w, w))
-
-        if enhanced:
-            sentence += " " + " ".join(enhanced)
-    else:
-        sentence = f"{subject_part} {verb} present"
-
-    return sentence.capitalize().strip() + "."
+    return sentence.strip().capitalize() + "."
 
 # =========================
 # EMOTION DETECTION
@@ -142,48 +121,40 @@ def refine_caption(caption):
 def detect_emotion(caption):
     text = caption.lower()
 
-    if any(w in text for w in ["smiling", "laughing"]):
+    if "smiling" in text or "laughing" in text:
         return "happy"
-
-    if any(w in text for w in ["running", "playing", "jumping", "riding"]):
+    elif "running" in text or "playing" in text or "jumping" in text or "climbing" in text:
         return "excited"
-
-    if "sitting" in text and any(w in text for w in ["lake", "bench", "tree"]):
+    elif "sitting" in text and ("lake" in text or "bench" in text):
         return "peaceful"
-
-    if any(w in text for w in ["alone", "crying"]):
+    elif "alone" in text:
         return "sad"
 
-    return None
+    return "neutral"
 
 # =========================
-# EMOTION INJECTION (SMART)
+# EMOTION INJECTION
 # =========================
 def inject_emotion(caption, emotion):
-    if emotion is None:
+    if emotion == "neutral":
         return caption
 
-    caption = caption.rstrip(".").lower()
+    caption = caption.rstrip(".")
 
-    emotion_map = {
-        "excited": "excitedly",
-        "happy": "happily",
-        "peaceful": "peacefully",
-        "sad": "sadly"
-    }
-
-    adverb = emotion_map.get(emotion, "")
-    words = caption.split()
-
-    for i, word in enumerate(words):
-        if word in ["is", "are"] and i + 1 < len(words):
-            words.insert(i + 2, adverb)
-            break
+    if " is running" in caption:
+        caption = caption.replace(" is running", f" is running {emotion}ly")
+    elif " are running" in caption:
+        caption = caption.replace(" are running", f" are running {emotion}ly")
+    elif " is playing" in caption:
+        caption = caption.replace(" is playing", f" is playing {emotion}ly")
+    elif " is jumping" in caption:
+        caption = caption.replace(" is jumping", f" is jumping {emotion}ly")
+    elif " is climbing" in caption:
+        caption = caption.replace(" is climbing", f" is climbing {emotion}ly")
     else:
-        words.append(adverb)
+        caption += f" {emotion}ly"
 
-    sentence = " ".join(words)
-    return sentence.capitalize() + "."
+    return caption + "."
 
 # =========================
 # BEAM SEARCH
@@ -232,7 +203,7 @@ def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
             if word not in ["<SOS>", "<PAD>"]:
                 words.append(word)
 
-    return " ".join(words[:15])
+    return " ".join(words)
 
 # =========================
 # STREAMLIT UI
@@ -248,15 +219,9 @@ if file:
         refined = refine_caption(raw)
 
         emotion = detect_emotion(refined)
-
-        if emotion:
-            final = inject_emotion(refined, emotion)
-        else:
-            final = refined
+        final = inject_emotion(refined, emotion)
 
         st.success("Generated Caption:")
         st.write(final)
 
-        if emotion:
-            st.info(f"Predicted Emotion: {emotion}")
-
+        st.info(f"Predicted Emotion: {emotion}")
