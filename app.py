@@ -68,14 +68,16 @@ def load_models():
     decoder = DecoderRNN(256, 512, len(vocab)).to(device)
 
     encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
-    decoder.load_state_dict(torch.load("decoder.pth", map_location=device))
+    
+    decoder.load_state_dict(
+        torch.load("decoder.pth", map_location=device),
+        strict=False   # 🔥 IMPORTANT FIX
+    )
 
     encoder.eval()
     decoder.eval()
 
     return encoder, decoder
-
-encoder, decoder = load_models()
 
 # =========================
 # IMAGE PREPROCESS
