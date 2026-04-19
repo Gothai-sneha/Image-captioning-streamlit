@@ -5,8 +5,6 @@ import torchvision.transforms as transforms
 import torchvision.models as models
 from PIL import Image
 import pickle
-import gdown
-import os
 
 # =========================
 # PAGE CONFIG
@@ -17,106 +15,58 @@ st.title("Emotion Enriched Image Captioning")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # =========================
-# GOOGLE DRIVE MODEL DOWNLOAD
-# =========================
-ENCODER_FILE_ID = "1CYccQ7JxBCJL_unbXTgtwCe4dLwEENUb"
-DECODER_FILE_ID = "1Sbu7VVU0kWH93l7z8-VCP8e4Y6f-IXYH"
-
-if not os.path.exists("encoder.pth"):
-    gdown.download(
-        f"https://drive.google.com/uc?id={ENCODER_FILE_ID}",
-        "encoder.pth",
-        quiet=False
-    )
-
-if not os.path.exists("decoder.pth"):
-    gdown.download(
-        f"https://drive.google.com/uc?id={DECODER_FILE_ID}",
-        "decoder.pth",
-        quiet=False
-    )
-
-# =========================
-# VOCAB CLASS (FOR PICKLE)
+# LOAD VOCAB
 # =========================
 class Vocabulary:
-    def __init__(self, freq_threshold=2):
-        self.freq_threshold = freq_threshold
+    def __init__(self):
         self.itos = {0: "<PAD>", 1: "<SOS>", 2: "<EOS>", 3: "<UNK>"}
         self.stoi = {v: k for k, v in self.itos.items()}
 
     def __len__(self):
         return len(self.itos)
 
-# =========================
-# LOAD VOCAB
-# =========================
 with open("vocab.pkl", "rb") as f:
     vocab = pickle.load(f)
 
 # =========================
-# EMOTION LABELS
-# =========================
-emotion_classes = ["happy", "sad", "peaceful", "excited", "neutral"]
-
-# =========================
-# ENCODER (NOTEBOOK MATCH)
+# ENCODER
 # =========================
 class EncoderCNN(nn.Module):
     def __init__(self):
         super().__init__()
         resnet = models.resnet50(weights="IMAGENET1K_V1")
-        modules = list(resnet.children())[:-1]
-        self.resnet = nn.Sequential(*modules)
+        self.resnet = nn.Sequential(*list(resnet.children())[:-1])
 
     def forward(self, images):
         features = self.resnet(images)
-        features = features.view(features.size(0), -1)
-        return features
+        return features.view(features.size(0), -1)
 
 # =========================
-# DECODER (NOTEBOOK MATCH)
+# DECODER
 # =========================
 class DecoderRNN(nn.Module):
-    def __init__(self, embed_size, hidden_size, vocab_size, encoder_dim=2048):
+    def __init__(self, embed_size, hidden_size, vocab_size):
         super().__init__()
-
         self.embedding = nn.Embedding(vocab_size, embed_size)
-
-        self.lstm = nn.LSTM(
-            embed_size + encoder_dim,
-            hidden_size,
-            batch_first=True
-        )
-
+        self.lstm = nn.LSTM(embed_size + 2048, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, vocab_size)
-        self.emotion_fc = nn.Linear(encoder_dim, len(emotion_classes))
-        self.dropout = nn.Dropout(0.5)
-
-    def forward(self, encoder_out, captions):
-        features = encoder_out.unsqueeze(1).repeat(1, captions.size(1), 1)
-        embeddings = self.embedding(captions)
-        inputs = torch.cat((embeddings, features), dim=2)
-        lstm_out, _ = self.lstm(inputs)
-        predictions = self.fc(self.dropout(lstm_out))
-        emotion_pred = self.emotion_fc(encoder_out)
-        return predictions, emotion_pred
 
 # =========================
 # LOAD MODEL
 # =========================
-embed_size = 256
-hidden_size = 512
-vocab_size = len(vocab)
+@st.cache_resource
+def load_models():
+    encoder = EncoderCNN().to(device)
+    decoder = DecoderRNN(256, 512, len(vocab)).to(device)
 
-encoder = EncoderCNN().to(device)
-decoder = DecoderRNN(embed_size, hidden_size, vocab_size).to(device)
+    encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
+    decoder.load_state_dict(torch.load("decoder.pth", map_location=device), strict=False)
 
-encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
-decoder.load_state_dict(torch.load("decoder.pth", map_location=device))
+    encoder.eval()
+    decoder.eval()
+    return encoder, decoder
 
-encoder.eval()
-decoder.eval()
+encoder, decoder = load_models()
 
 # =========================
 # IMAGE PREPROCESS
@@ -124,108 +74,158 @@ decoder.eval()
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
-    )
+    transforms.Normalize([0.485, 0.456, 0.406],
+                         [0.229, 0.224, 0.225])
 ])
 
 # =========================
-# CLEAN CAPTION
+# CLEAN + STRUCTURE CAPTION
 # =========================
-def clean_caption(caption):
-    caption = caption.strip()
-    caption = caption.replace(" .", ".")
-    caption = caption.replace("..", ".")
-    if len(caption) == 0:
-        return "No caption generated."
-    return caption.capitalize() + "."
+def refine_caption(caption):
+    caption = caption.lower()
+
+    words = [w for w in caption.split() if w not in ["<unk>", "<pad>", "<sos>"]]
+
+    if not words:
+        return "An image."
+
+    sentence = " ".join(words)
+
+    # Add proper grammar (is/are)
+    if sentence.startswith(("a ", "the ", "one ")):
+        sentence = sentence.replace(" running", " is running")
+        sentence = sentence.replace(" playing", " is playing")
+        sentence = sentence.replace(" sitting", " is sitting")
+        sentence = sentence.replace(" standing", " is standing")
+
+    if sentence.startswith(("two ", "three ", "many ")):
+        sentence = sentence.replace(" running", " are running")
+        sentence = sentence.replace(" playing", " are playing")
+        sentence = sentence.replace(" sitting", " are sitting")
+
+    # Remove duplicate words
+    cleaned = []
+    for w in sentence.split():
+        if not cleaned or cleaned[-1] != w:
+            cleaned.append(w)
+
+    sentence = " ".join(cleaned).strip()
+
+    if len(sentence.split()) < 3:
+        sentence = "An image showing something"
+
+    return sentence.capitalize() + "."
 
 # =========================
-# EMOTION POST-PROCESS
+# EMOTION DETECTION
 # =========================
-def get_emotion_from_caption(caption):
+def detect_emotion(caption):
     text = caption.lower()
 
-    if any(word in text for word in ["smile", "laugh", "happy"]):
+    if "smiling" in text or "laughing" in text:
         return "happy"
-    elif any(word in text for word in ["run", "jump", "play"]):
+    elif "running" in text or "playing" in text or "trick" in text:
         return "excited"
-    elif any(word in text for word in ["sit", "lake", "tree", "peace"]):
+    elif "sitting" in text and ("lake" in text or "bench" in text):
         return "peaceful"
-    elif any(word in text for word in ["cry", "sad"]):
+    elif "alone" in text or "crying" in text:
         return "sad"
-    else:
-        return "neutral"
+
+    return None
 
 # =========================
-# BEAM SEARCH CAPTION
+# INSERT EMOTION INTO SENTENCE
 # =========================
-def generate_caption(image, beam_width=3, max_len=20):
+def inject_emotion(caption, emotion):
+    if emotion is None:
+        return caption
+
+    caption = caption.rstrip(".")
+
+    if " is running" in caption:
+        caption = caption.replace(" is running", f" is running {emotion}ly")
+    elif " are running" in caption:
+        caption = caption.replace(" are running", f" are running {emotion}ly")
+    elif " is playing" in caption:
+        caption = caption.replace(" is playing", f" is playing {emotion}ly")
+    elif " are playing" in caption:
+        caption = caption.replace(" are playing", f" are playing {emotion}ly")
+    else:
+        caption = caption + f" {emotion}ly"
+
+    return caption + "."
+
+# =========================
+# BEAM SEARCH
+# =========================
+def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
     image = transform(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
         features = encoder(image)
+        sequences = [[[], 0.0, None]]
 
-    sequences = [[[], 0.0, None]]
+        for _ in range(max_len):
+            all_candidates = []
 
-    for _ in range(max_len):
-        all_candidates = []
+            for seq, score, hidden in sequences:
 
-        for seq, score, hidden in sequences:
-            if len(seq) == 0:
-                word = torch.tensor([[vocab.stoi["<SOS>"]]]).to(device)
-            else:
-                word = torch.tensor([[seq[-1]]]).to(device)
+                if len(seq) > 0 and seq[-1] == vocab.stoi["<EOS>"]:
+                    all_candidates.append([seq, score, hidden])
+                    continue
 
-            embedding = decoder.embedding(word)
-            feature_step = features.unsqueeze(1)
+                word = torch.tensor([
+                    [vocab.stoi["<SOS>"] if len(seq) == 0 else seq[-1]]
+                ]).to(device)
 
-            lstm_input = torch.cat((embedding, feature_step), dim=2)
+                emb = decoder.embedding(word)
+                inp = torch.cat((emb, features.unsqueeze(1)), dim=2)
 
-            output, hidden = decoder.lstm(lstm_input, hidden)
-            output = decoder.fc(output.squeeze(1))
+                output, new_hidden = decoder.lstm(inp, hidden)
+                output = decoder.fc(output.squeeze(1))
 
-            log_probs = torch.log_softmax(output, dim=1)
-            topk = torch.topk(log_probs, beam_width)
+                log_probs = torch.log_softmax(output, dim=1)
+                topk = torch.topk(log_probs, beam_width)
 
-            for i in range(beam_width):
-                word_idx = topk.indices[0][i].item()
-                prob = topk.values[0][i].item()
-                candidate = [seq + [word_idx], score - prob, hidden]
-                all_candidates.append(candidate)
+                for i in range(beam_width):
+                    idx = topk.indices[0][i].item()
+                    prob = topk.values[0][i].item()
+                    all_candidates.append([seq + [idx], score + prob, new_hidden])
 
-        ordered = sorted(all_candidates, key=lambda x: x[1])
-        sequences = ordered[:beam_width]
+            sequences = sorted(
+                all_candidates,
+                key=lambda x: x[1] / len(x[0]),
+                reverse=True
+            )[:beam_width]
 
-    best_seq = sequences[0][0]
-
-    words = []
-    for idx in best_seq:
-        word = vocab.itos.get(idx, "")
-        if word == "<EOS>":
-            break
-        if word not in ["<SOS>", "<PAD>"]:
-            words.append(word)
+        words = []
+        for idx in sequences[0][0]:
+            word = vocab.itos.get(idx, "")
+            if word == "<EOS>":
+                break
+            if word not in ["<SOS>", "<PAD>"]:
+                words.append(word)
 
     return " ".join(words)
 
 # =========================
 # STREAMLIT UI
 # =========================
-uploaded_file = st.file_uploader(
-    "Upload an image",
-    type=["jpg", "jpeg", "png"]
-)
+file = st.file_uploader("Upload Image", ["jpg", "png", "jpeg"])
 
-if uploaded_file:
-    image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="Uploaded Image", use_container_width=True)
+if file:
+    img = Image.open(file).convert("RGB")
+    st.image(img, use_container_width=True)
 
     if st.button("Generate Caption"):
-        raw_caption = generate_caption(image)
-        final_caption = clean_caption(raw_caption)
-        emotion = get_emotion_from_caption(final_caption)
+        raw = generate_caption(img, encoder, decoder)
+        refined = refine_caption(raw)
 
-        st.success(f"Caption: {final_caption}")
-        st.info(f"Predicted Emotion: {emotion}")
+        emotion = detect_emotion(refined)
+        final = inject_emotion(refined, emotion)
+
+        st.success("Generated Caption:")
+        st.write(final)
+
+        if emotion:
+            st.info(f"Predicted Emotion: {emotion}")
