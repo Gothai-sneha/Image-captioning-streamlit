@@ -1,3 +1,4 @@
+
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -79,7 +80,7 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# IMPROVED CAPTION CLEANING
+# CLEAN CAPTION
 # =========================
 def refine_caption(caption):
     caption = caption.lower()
@@ -89,41 +90,23 @@ def refine_caption(caption):
     if not words:
         return "An image."
 
-    sentence = " ".join(words)
-
-    # remove duplicates
+    # remove consecutive duplicates
     cleaned = []
-    for w in sentence.split():
+    for w in words:
         if len(cleaned) == 0 or cleaned[-1] != w:
             cleaned.append(w)
 
     sentence = " ".join(cleaned)
 
-    # fix grammar patterns
-    replacements = {
-        "a man is": "a man",
-        "a woman is": "a woman",
-        "a person is": "a person",
-        "is standing": "standing",
-        "is sitting": "sitting",
-        "is playing": "playing",
-        "is doing": "",
-        "are standing": "standing",
-        "are sitting": "sitting",
-        "on a a": "on a",
-        "in a a": "in a",
-    }
+    # basic grammar fixes
+    sentence = sentence.replace(" is ", " ")
+    sentence = sentence.replace(" are ", " ")
+    sentence = sentence.replace(" a a ", " a ")
 
-    for k, v in replacements.items():
-        sentence = sentence.replace(k, v)
+    sentence = sentence.strip().capitalize()
 
-    sentence = sentence.strip()
-
-    # fallback if too weak
-    if len(sentence.split()) < 3:
-        sentence = "An image showing something"
-
-    sentence = sentence.capitalize() + "."
+    if not sentence.endswith("."):
+        sentence += "."
 
     return sentence
 
@@ -145,22 +128,28 @@ def detect_emotion(caption):
     return "neutral"
 
 # =========================
-# EMOTION INJECTION (SUBTLE)
+# EMOTION INJECTION (FIXED)
 # =========================
 def inject_emotion(caption, emotion):
     if emotion == "neutral":
         return caption
 
-    if emotion == "excited":
-        return caption.replace(".", " with excitement.")
-    elif emotion == "happy":
-        return caption.replace(".", " with a joyful mood.")
-    elif emotion == "peaceful":
-        return caption.replace(".", " in a calm setting.")
-    elif emotion == "sad":
-        return caption.replace(".", " in a sad moment.")
+    caption = caption.strip().rstrip(".")
 
-    return caption
+    # avoid duplication
+    if any(phrase in caption for phrase in ["with excitement", "joyful", "calm", "sad"]):
+        return caption + "."
+
+    if emotion == "excited":
+        return caption + " with excitement."
+    elif emotion == "happy":
+        return caption + " with a joyful mood."
+    elif emotion == "peaceful":
+        return caption + " in a calm setting."
+    elif emotion == "sad":
+        return caption + " in a sad moment."
+
+    return caption + "."
 
 # =========================
 # BEAM SEARCH
