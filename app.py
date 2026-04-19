@@ -228,4 +228,3 @@ if file:
 
         st.success("Generated Caption:")
         st.write(final)
-```
