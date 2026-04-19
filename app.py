@@ -119,11 +119,9 @@ def get_emotion_from_caption(caption):
     if any(w in text for w in ["cry", "sad", "alone", "lonely"]):
         return "sad"
 
-    # 🔥 NEW: TIRED DETECTION
     if any(w in text for w in ["rest", "sleep", "lying", "exhausted", "tired"]):
         return "tired"
 
-    # fallback rules
     if "group of people" in text:
         return "happy"
 
@@ -144,7 +142,7 @@ def enrich_caption_with_emotion(caption, emotion):
 
     sentence = caption
 
-    # Fix grammar
+    # Grammar fix
     if " are " not in sentence:
         sentence = sentence.replace(" standing", " is standing") \
                            .replace(" running", " is running") \
@@ -152,10 +150,11 @@ def enrich_caption_with_emotion(caption, emotion):
                            .replace(" sitting", " is sitting") \
                            .replace(" lying", " is lying")
 
-    # Emotion handling
+    # Tired special case
     if emotion == "tired":
-        return sentence.capitalize() + " looking tired."
+        return sentence.strip().rstrip(".").capitalize() + " looking tired."
 
+    # Emotion mapping
     emotion_map = {
         "happy": "happily",
         "excited": "excitedly",
@@ -181,7 +180,7 @@ def enrich_caption_with_emotion(caption, emotion):
         else:
             sentence += f" {emotion_word}"
 
-    return sentence.capitalize() + "."
+    return sentence.strip().rstrip(".").capitalize() + "."
 
 # =========================
 # BEAM SEARCH
