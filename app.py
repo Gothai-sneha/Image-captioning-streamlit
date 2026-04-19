@@ -80,27 +80,9 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# IMPROVED CAPTION CLEANING
+# GRAMMAR CORRECTION LAYER
 # =========================
-def refine_caption(caption):
-    caption = caption.lower()
-
-    words = [w for w in caption.split() if w not in ["<unk>", "<pad>", "<sos>"]]
-
-    if not words:
-        return "An image."
-
-    sentence = " ".join(words)
-
-    # remove duplicates
-    cleaned = []
-    for w in sentence.split():
-        if len(cleaned) == 0 or cleaned[-1] != w:
-            cleaned.append(w)
-
-    sentence = " ".join(cleaned)
-
-    # fix grammar patterns
+def grammar_correction(sentence):
     replacements = {
         "a man is": "a man",
         "a woman is": "a woman",
@@ -113,20 +95,42 @@ def refine_caption(caption):
         "are sitting": "sitting",
         "on a a": "on a",
         "in a a": "in a",
+        "with a a": "with a",
     }
 
     for k, v in replacements.items():
         sentence = sentence.replace(k, v)
 
+    return sentence
+
+# =========================
+# CLEAN CAPTION
+# =========================
+def refine_caption(caption):
+    caption = caption.lower()
+
+    words = [w for w in caption.split() if w not in ["<unk>", "<pad>", "<sos>"]]
+
+    if not words:
+        return "An image."
+
+    # remove consecutive duplicates
+    cleaned = []
+    for w in words:
+        if not cleaned or cleaned[-1] != w:
+            cleaned.append(w)
+
+    sentence = " ".join(cleaned)
+
+    # apply grammar correction
+    sentence = grammar_correction(sentence)
+
     sentence = sentence.strip()
 
-    # fallback if too weak
     if len(sentence.split()) < 3:
         sentence = "An image showing something"
 
-    sentence = sentence.capitalize() + "."
-
-    return sentence
+    return sentence.capitalize() + "."
 
 # =========================
 # EMOTION DETECTION
@@ -134,34 +138,36 @@ def refine_caption(caption):
 def detect_emotion(caption):
     text = caption.lower()
 
-    if any(w in text for w in ["smile", "laugh", "happy"]):
+    if "smiling" in text or "laughing" in text:
         return "happy"
-    elif any(w in text for w in ["run", "jump", "play", "skate", "ride"]):
+    elif "trick" in text or "jump" in text:
         return "excited"
-    elif any(w in text for w in ["sit", "calm", "lake", "river", "bench"]):
+    elif "sitting" in text and ("lake" in text or "bench" in text):
         return "peaceful"
-    elif any(w in text for w in ["alone", "cry", "sad"]):
+    elif "alone" in text or "crying" in text:
         return "sad"
 
-    return "neutral"
+    return None
 
 # =========================
-# EMOTION INJECTION (SUBTLE)
+# EMOTION INJECTION
 # =========================
 def inject_emotion(caption, emotion):
-    if emotion == "neutral":
+    if emotion is None:
         return caption
 
-    if emotion == "excited":
-        return caption.replace(".", " with excitement.")
-    elif emotion == "happy":
-        return caption.replace(".", " with a joyful mood.")
-    elif emotion == "peaceful":
-        return caption.replace(".", " in a calm setting.")
-    elif emotion == "sad":
-        return caption.replace(".", " in a sad moment.")
+    caption = caption.rstrip(".")
 
-    return caption
+    if emotion == "excited":
+        return caption + " in an energetic moment."
+    elif emotion == "happy":
+        return caption + " with a smile."
+    elif emotion == "peaceful":
+        return caption + " in a calm setting."
+    elif emotion == "sad":
+        return caption + " in a sad moment."
+
+    return caption + "."
 
 # =========================
 # BEAM SEARCH
@@ -235,5 +241,6 @@ if file:
         st.success("Generated Caption:")
         st.write(final)
 
-        st.info(f"Predicted Emotion: {emotion}")
+        if emotion:
+            st.info(f"Predicted Emotion: {emotion}")
 
