@@ -1,4 +1,4 @@
-
+```python
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -94,7 +94,7 @@ def refine_caption(caption):
     verbs = [
         "running", "playing", "sitting", "standing",
         "walking", "jumping", "catching", "holding",
-        "riding", "eating", "drinking"
+        "riding", "eating", "drinking", "climbing"
     ]
 
     has_verb = any(v in sentence for v in verbs)
@@ -110,7 +110,7 @@ def refine_caption(caption):
         else:
             sentence += " is present"
 
-    # fix singular/plural grammar
+    # fix plural grammar
     if sentence.startswith(("two ", "three ", "many ")):
         sentence = sentence.replace(" is ", " are ")
 
@@ -124,20 +124,20 @@ def detect_emotion(caption):
 
     if "smiling" in text or "laughing" in text:
         return "happy"
-    elif "running" in text or "playing" in text or "jumping" in text:
+    elif "running" in text or "playing" in text or "jumping" in text or "climbing" in text:
         return "excited"
     elif "sitting" in text and ("lake" in text or "bench" in text):
         return "peaceful"
     elif "alone" in text:
         return "sad"
 
-    return None
+    return "neutral"
 
 # =========================
 # EMOTION INJECTION
 # =========================
 def inject_emotion(caption, emotion):
-    if emotion is None:
+    if emotion == "neutral":
         return caption
 
     caption = caption.rstrip(".")
@@ -150,6 +150,8 @@ def inject_emotion(caption, emotion):
         caption = caption.replace(" is playing", f" is playing {emotion}ly")
     elif " is jumping" in caption:
         caption = caption.replace(" is jumping", f" is jumping {emotion}ly")
+    elif " is climbing" in caption:
+        caption = caption.replace(" is climbing", f" is climbing {emotion}ly")
     else:
         caption += f" {emotion}ly"
 
@@ -223,6 +225,5 @@ if file:
         st.success("Generated Caption:")
         st.write(final)
 
-        if emotion:
-            st.info(f"Predicted Emotion: {emotion}")
-
+        st.info(f"Predicted Emotion: {emotion}")
+```
