@@ -1,4 +1,3 @@
-
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -74,7 +73,6 @@ transform = transforms.Compose([
 # =========================
 def refine_caption(caption):
     caption = caption.lower().replace(".", "")
-
     words = [w for w in caption.split() if w not in ["<unk>", "<pad>", "<sos>"]]
 
     if not words:
@@ -82,7 +80,6 @@ def refine_caption(caption):
 
     sentence = " ".join(words)
 
-    # remove duplicate consecutive words
     cleaned = []
     for w in sentence.split():
         if not cleaned or cleaned[-1] != w:
@@ -90,16 +87,14 @@ def refine_caption(caption):
 
     sentence = " ".join(cleaned)
 
-    # detect verbs
     verbs = [
         "running", "playing", "sitting", "standing",
         "walking", "jumping", "catching", "holding",
-        "riding", "eating", "drinking"
+        "riding", "eating", "drinking", "climbing"
     ]
 
     has_verb = any(v in sentence for v in verbs)
 
-    # add action only if missing
     if not has_verb:
         if "ball" in sentence or "frisbee" in sentence:
             sentence += " is playing"
@@ -110,48 +105,64 @@ def refine_caption(caption):
         else:
             sentence += " is present"
 
-    # fix singular/plural grammar
     if sentence.startswith(("two ", "three ", "many ")):
         sentence = sentence.replace(" is ", " are ")
 
     return sentence.strip().capitalize() + "."
 
 # =========================
-# EMOTION DETECTION
+# IMPROVED EMOTION DETECTION
 # =========================
 def detect_emotion(caption):
     text = caption.lower()
 
+    # stronger but still controlled triggers
     if "smiling" in text or "laughing" in text:
         return "happy"
-    elif "running" in text or "playing" in text or "jumping" in text:
+
+    if "jumping" in text or "playing" in text:
         return "excited"
-    elif "sitting" in text and ("lake" in text or "bench" in text):
+
+    if "sitting" in text:
         return "peaceful"
-    elif "alone" in text:
+
+    if "alone" in text:
         return "sad"
 
-    return None
+    return "neutral"
 
 # =========================
-# EMOTION INJECTION
+# STRONG EMOTION INJECTION (ENSURED OUTPUT)
 # =========================
 def inject_emotion(caption, emotion):
-    if emotion is None:
-        return caption
-
     caption = caption.rstrip(".")
 
-    if " is running" in caption:
-        caption = caption.replace(" is running", f" is running {emotion}ly")
-    elif " are running" in caption:
-        caption = caption.replace(" are running", f" are running {emotion}ly")
-    elif " is playing" in caption:
-        caption = caption.replace(" is playing", f" is playing {emotion}ly")
-    elif " is jumping" in caption:
-        caption = caption.replace(" is jumping", f" is jumping {emotion}ly")
-    else:
-        caption += f" {emotion}ly"
+    if emotion == "neutral":
+        return caption + "."
+
+    if emotion == "happy":
+        if " is " in caption:
+            caption = caption.replace(" is ", " is smiling and ", 1)
+        else:
+            caption += " happily"
+
+    elif emotion == "excited":
+        if " is " in caption:
+            caption = caption.replace(" is ", " is excitedly ", 1)
+        else:
+            caption += " excitedly"
+
+    elif emotion == "peaceful":
+        if " is " in caption:
+            caption = caption.replace(" is ", " is sitting peacefully ", 1)
+        else:
+            caption += " peacefully"
+
+    elif emotion == "sad":
+        if " is " in caption:
+            caption = caption.replace(" is ", " is sadly ", 1)
+        else:
+            caption += " sadly"
 
     return caption + "."
 
@@ -223,6 +234,4 @@ if file:
         st.success("Generated Caption:")
         st.write(final)
 
-        if emotion:
-            st.info(f"Predicted Emotion: {emotion}")
-
+        st.info(f"Predicted Emotion: {emotion}")
