@@ -80,11 +80,11 @@ def refine_caption(caption):
 
     sentence = " ".join(words)
 
-    # remove duplicates
     cleaned = []
     for w in sentence.split():
         if not cleaned or cleaned[-1] != w:
             cleaned.append(w)
+
     sentence = " ".join(cleaned)
 
     verbs = [
@@ -93,10 +93,14 @@ def refine_caption(caption):
         "riding", "eating", "drinking", "climbing"
     ]
 
-    if not any(v in sentence for v in verbs):
-        if "ball" in sentence:
+    has_verb = any(v in sentence for v in verbs)
+
+    if not has_verb:
+        if "ball" in sentence or "frisbee" in sentence:
             sentence += " is playing"
         elif "dog" in sentence:
+            sentence += " is standing"
+        elif "person" in sentence or "man" in sentence or "woman" in sentence:
             sentence += " is standing"
         else:
             sentence += " is present"
@@ -104,53 +108,61 @@ def refine_caption(caption):
     if sentence.startswith(("two ", "three ", "many ")):
         sentence = sentence.replace(" is ", " are ")
 
-    return sentence.capitalize() + "."
+    return sentence.strip().capitalize() + "."
 
 # =========================
-# STRICT EMOTION DETECTION
+# IMPROVED EMOTION DETECTION
 # =========================
 def detect_emotion(caption):
     text = caption.lower()
 
-    # ONLY strong signals (no running/playing trigger)
+    # stronger but still controlled triggers
     if "smiling" in text or "laughing" in text:
         return "happy"
 
-    if "jumping high" in text or "celebrating" in text or "cheering" in text:
+    if "jumping" in text or "playing" in text:
         return "excited"
 
-    if "sitting" in text and ("lake" in text or "bench" in text):
+    if "sitting" in text:
         return "peaceful"
 
-    if "crying" in text or "alone" in text:
+    if "alone" in text:
         return "sad"
 
     return "neutral"
 
 # =========================
-# CONTROLLED EMOTION INJECTION
+# STRONG EMOTION INJECTION (ENSURED OUTPUT)
 # =========================
 def inject_emotion(caption, emotion):
-    if emotion == "neutral":
-        return caption  # 🔥 no change
-
     caption = caption.rstrip(".")
+
+    if emotion == "neutral":
+        return caption + "."
 
     if emotion == "happy":
         if " is " in caption:
             caption = caption.replace(" is ", " is smiling and ", 1)
+        else:
+            caption += " happily"
 
     elif emotion == "excited":
-        if " is jumping" in caption:
-            caption = caption.replace(" is jumping", " is jumping excitedly")
+        if " is " in caption:
+            caption = caption.replace(" is ", " is excitedly ", 1)
+        else:
+            caption += " excitedly"
 
     elif emotion == "peaceful":
-        if " is sitting" in caption:
-            caption = caption.replace(" is sitting", " is sitting peacefully")
+        if " is " in caption:
+            caption = caption.replace(" is ", " is sitting peacefully ", 1)
+        else:
+            caption += " peacefully"
 
     elif emotion == "sad":
         if " is " in caption:
             caption = caption.replace(" is ", " is sadly ", 1)
+        else:
+            caption += " sadly"
 
     return caption + "."
 
