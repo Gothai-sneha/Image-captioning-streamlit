@@ -23,11 +23,14 @@ class Vocabulary:
         self.itos = {0: "<PAD>", 1: "<SOS>", 2: "<EOS>", 3: "<UNK>"}
         self.stoi = {v: k for k, v in self.itos.items()}
 
+    def __len__(self):
+        return len(self.itos)
+
 with open("vocab.pkl", "rb") as f:
     vocab = pickle.load(f)
 
 # =========================
-# MODEL
+# ENCODER
 # =========================
 class EncoderCNN(nn.Module):
     def __init__(self):
@@ -36,8 +39,12 @@ class EncoderCNN(nn.Module):
         self.resnet = nn.Sequential(*list(resnet.children())[:-1])
 
     def forward(self, images):
-        return self.resnet(images).view(images.size(0), -1)
+        features = self.resnet(images)
+        return features.view(features.size(0), -1)
 
+# =========================
+# DECODER
+# =========================
 class DecoderRNN(nn.Module):
     def __init__(self, embed_size, hidden_size, vocab_size):
         super().__init__()
@@ -45,6 +52,9 @@ class DecoderRNN(nn.Module):
         self.lstm = nn.LSTM(embed_size + 2048, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, vocab_size)
 
+# =========================
+# LOAD MODEL
+# =========================
 @st.cache_resource
 def load_models():
     encoder = EncoderCNN().to(device)
@@ -70,96 +80,92 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# CAPTION REFINEMENT
+# GRAMMAR CORRECTION LAYER
+# =========================
+def grammar_correction(sentence):
+    replacements = {
+        "a man is": "a man",
+        "a woman is": "a woman",
+        "a person is": "a person",
+        "is standing": "standing",
+        "is sitting": "sitting",
+        "is playing": "playing",
+        "is doing": "",
+        "are standing": "standing",
+        "are sitting": "sitting",
+        "on a a": "on a",
+        "in a a": "in a",
+        "with a a": "with a",
+    }
+
+    for k, v in replacements.items():
+        sentence = sentence.replace(k, v)
+
+    return sentence
+
+# =========================
+# CLEAN CAPTION
 # =========================
 def refine_caption(caption):
-    caption = caption.lower().replace(".", "")
+    caption = caption.lower()
 
     words = [w for w in caption.split() if w not in ["<unk>", "<pad>", "<sos>"]]
 
     if not words:
         return "An image."
 
-    sentence = " ".join(words)
-
-    # remove duplicate words
+    # remove consecutive duplicates
     cleaned = []
-    for w in sentence.split():
+    for w in words:
         if not cleaned or cleaned[-1] != w:
             cleaned.append(w)
 
     sentence = " ".join(cleaned)
 
-    # detect verbs
-    verbs = [
-        "running", "playing", "sitting", "standing",
-        "walking", "jumping", "catching", "holding",
-        "riding", "eating", "drinking", "climbing"
-    ]
+    # apply grammar correction
+    sentence = grammar_correction(sentence)
 
-    has_verb = any(v in sentence for v in verbs)
+    sentence = sentence.strip()
 
-    # add verb only if missing
-    if not has_verb:
-        if "ball" in sentence or "frisbee" in sentence:
-            sentence += " is playing"
-        elif "dog" in sentence:
-            sentence += " is standing"
-        elif "person" in sentence or "man" in sentence or "woman" in sentence or "boy" in sentence or "girl" in sentence:
-            sentence += " is standing"
-        else:
-            sentence += " is present"
+    if len(sentence.split()) < 3:
+        sentence = "An image showing something"
 
-    # fix plural grammar
-    if sentence.startswith(("two ", "three ", "many ")):
-        sentence = sentence.replace(" is ", " are ")
-
-    return sentence.strip().capitalize() + "."
+    return sentence.capitalize() + "."
 
 # =========================
-# EMOTION DETECTION (STRICT)
+# EMOTION DETECTION
 # =========================
 def detect_emotion(caption):
     text = caption.lower()
 
     if "smiling" in text or "laughing" in text:
         return "happy"
-
-    if "jumping high" in text or "celebrating" in text or "cheering" in text:
+    elif "trick" in text or "jump" in text:
         return "excited"
-
-    if "sitting quietly" in text or ("sitting" in text and "lake" in text):
+    elif "sitting" in text and ("lake" in text or "bench" in text):
         return "peaceful"
-
-    if "crying" in text or "alone" in text:
+    elif "alone" in text or "crying" in text:
         return "sad"
 
-    return "neutral"
+    return None
 
 # =========================
 # EMOTION INJECTION
 # =========================
 def inject_emotion(caption, emotion):
-    if emotion == "neutral":
+    if emotion is None:
         return caption
 
     caption = caption.rstrip(".")
 
-    if emotion == "happy":
-        caption = caption.replace(" is ", " is smiling and ", 1)
-
-    elif emotion == "excited":
-        if " is jumping" in caption:
-            caption = caption.replace(" is jumping", " is jumping excitedly")
-        elif " are jumping" in caption:
-            caption = caption.replace(" are jumping", " are jumping excitedly")
-
+    if emotion == "excited":
+        return caption + " in an energetic moment."
+    elif emotion == "happy":
+        return caption + " with a smile."
     elif emotion == "peaceful":
-        if " is sitting" in caption:
-            caption = caption.replace(" is sitting", " is sitting peacefully")
-
+        return caption + " in a calm setting."
     elif emotion == "sad":
-        caption = caption.replace(" is ", " is sadly ", 1)
+        return caption + " in a sad moment."
 
     return caption + "."
 
@@ -200,7 +206,11 @@ def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
                     prob = topk.values[0][i].item()
                     all_candidates.append([seq + [idx], score + prob, new_hidden])
 
-            sequences = sorted(all_candidates, key=lambda x: x[1]/len(x[0]), reverse=True)[:beam_width]
+            sequences = sorted(
+                all_candidates,
+                key=lambda x: x[1] / len(x[0]),
+                reverse=True
+            )[:beam_width]
 
         words = []
         for idx in sequences[0][0]:
@@ -231,4 +241,6 @@ if file:
         st.success("Generated Caption:")
         st.write(final)
 
-        st.info(f"Predicted Emotion: {emotion}")
+        if emotion:
+            st.info(f"Predicted Emotion: {emotion}")
+
