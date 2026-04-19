@@ -7,6 +7,9 @@ import torchvision.models as models
 from PIL import Image
 import pickle
 
+# =========================
+# PAGE CONFIG
+# =========================
 st.set_page_config(page_title="Emotion Enriched Image Captioning")
 st.title("Emotion Enriched Image Captioning")
 
@@ -57,7 +60,7 @@ def load_models():
 encoder, decoder = load_models()
 
 # =========================
-# TRANSFORM
+# IMAGE PREPROCESS
 # =========================
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -67,7 +70,7 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# CAPTION FIXER (ROBUST)
+# CAPTION REFINEMENT
 # =========================
 def refine_caption(caption):
     caption = caption.lower().replace(".", "")
@@ -79,7 +82,7 @@ def refine_caption(caption):
 
     sentence = " ".join(words)
 
-    # remove duplicates
+    # remove duplicate consecutive words
     cleaned = []
     for w in sentence.split():
         if not cleaned or cleaned[-1] != w:
@@ -87,14 +90,18 @@ def refine_caption(caption):
 
     sentence = " ".join(cleaned)
 
-    # detect if verb exists
-    verbs = ["running", "playing", "sitting", "standing", "walking"]
+    # detect verbs
+    verbs = [
+        "running", "playing", "sitting", "standing",
+        "walking", "jumping", "catching", "holding",
+        "riding", "eating", "drinking"
+    ]
 
     has_verb = any(v in sentence for v in verbs)
 
-    # if no verb → add generic one
+    # add action only if missing
     if not has_verb:
-        if "ball" in sentence or "soccer" in sentence:
+        if "ball" in sentence or "frisbee" in sentence:
             sentence += " is playing"
         elif "dog" in sentence:
             sentence += " is standing"
@@ -103,21 +110,21 @@ def refine_caption(caption):
         else:
             sentence += " is present"
 
-    # fix is/are
+    # fix singular/plural grammar
     if sentence.startswith(("two ", "three ", "many ")):
         sentence = sentence.replace(" is ", " are ")
 
     return sentence.strip().capitalize() + "."
 
 # =========================
-# EMOTION (STRICT)
+# EMOTION DETECTION
 # =========================
 def detect_emotion(caption):
     text = caption.lower()
 
     if "smiling" in text or "laughing" in text:
         return "happy"
-    elif "running" in text or "playing" in text:
+    elif "running" in text or "playing" in text or "jumping" in text:
         return "excited"
     elif "sitting" in text and ("lake" in text or "bench" in text):
         return "peaceful"
@@ -127,7 +134,7 @@ def detect_emotion(caption):
     return None
 
 # =========================
-# EMOTION INSERT
+# EMOTION INJECTION
 # =========================
 def inject_emotion(caption, emotion):
     if emotion is None:
@@ -141,6 +148,8 @@ def inject_emotion(caption, emotion):
         caption = caption.replace(" are running", f" are running {emotion}ly")
     elif " is playing" in caption:
         caption = caption.replace(" is playing", f" is playing {emotion}ly")
+    elif " is jumping" in caption:
+        caption = caption.replace(" is jumping", f" is jumping {emotion}ly")
     else:
         caption += f" {emotion}ly"
 
@@ -196,7 +205,7 @@ def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
     return " ".join(words)
 
 # =========================
-# UI
+# STREAMLIT UI
 # =========================
 file = st.file_uploader("Upload Image", ["jpg", "png", "jpeg"])
 
