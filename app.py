@@ -52,13 +52,6 @@ class DecoderRNN(nn.Module):
         self.lstm = nn.LSTM(embed_size + 2048, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, vocab_size)
 
-    def forward(self, encoder_out, captions):
-        features = encoder_out.unsqueeze(1).repeat(1, captions.size(1), 1)
-        embeddings = self.embedding(captions)
-        inputs = torch.cat((embeddings, features), dim=2)
-        lstm_out, _ = self.lstm(inputs)
-        return self.fc(lstm_out)
-
 # =========================
 # LOAD MODEL (CACHED)
 # =========================
@@ -68,16 +61,17 @@ def load_models():
     decoder = DecoderRNN(256, 512, len(vocab)).to(device)
 
     encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
-    
     decoder.load_state_dict(
         torch.load("decoder.pth", map_location=device),
-        strict=False   # 🔥 IMPORTANT FIX
+        strict=False  # ignore extra layers like emotion_fc
     )
 
     encoder.eval()
     decoder.eval()
 
     return encoder, decoder
+
+encoder, decoder = load_models()
 
 # =========================
 # IMAGE PREPROCESS
@@ -124,7 +118,7 @@ def refine_caption(caption):
     return sentence
 
 # =========================
-# EMOTION LOGIC (ONLY WHEN NEEDED)
+# EMOTION LOGIC
 # =========================
 def refine_emotion(caption):
     text = caption.lower()
@@ -159,9 +153,9 @@ def inject_emotion(caption, emotion):
     return caption
 
 # =========================
-# BEAM SEARCH (FIXED)
+# BEAM SEARCH
 # =========================
-def generate_caption(image, beam_width=3, max_len=20):
+def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
     image = transform(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
@@ -173,7 +167,6 @@ def generate_caption(image, beam_width=3, max_len=20):
 
             for seq, score, hidden in sequences:
 
-                # stop if EOS reached
                 if len(seq) > 0 and seq[-1] == vocab.stoi["<EOS>"]:
                     all_candidates.append([seq, score, hidden])
                     continue
@@ -222,7 +215,7 @@ if file:
     st.image(img, use_container_width=True)
 
     if st.button("Generate Caption"):
-        raw = generate_caption(img)
+        raw = generate_caption(img, encoder, decoder)
         refined = refine_caption(raw)
 
         emotion = refine_emotion(refined)
