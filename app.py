@@ -1,4 +1,3 @@
-
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -53,7 +52,7 @@ class DecoderRNN(nn.Module):
         self.fc = nn.Linear(hidden_size, vocab_size)
 
 # =========================
-# LOAD MODEL (CACHED)
+# LOAD MODEL
 # =========================
 @st.cache_resource
 def load_models():
@@ -61,14 +60,10 @@ def load_models():
     decoder = DecoderRNN(256, 512, len(vocab)).to(device)
 
     encoder.load_state_dict(torch.load("encoder.pth", map_location=device))
-    decoder.load_state_dict(
-        torch.load("decoder.pth", map_location=device),
-        strict=False  # ignore extra layers like emotion_fc
-    )
+    decoder.load_state_dict(torch.load("decoder.pth", map_location=device), strict=False)
 
     encoder.eval()
     decoder.eval()
-
     return encoder, decoder
 
 encoder, decoder = load_models()
@@ -84,7 +79,7 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# CLEAN CAPTION
+# IMPROVED CAPTION CLEANING
 # =========================
 def refine_caption(caption):
     caption = caption.lower()
@@ -96,7 +91,7 @@ def refine_caption(caption):
 
     sentence = " ".join(words)
 
-    # remove repeated words
+    # remove duplicates
     cleaned = []
     for w in sentence.split():
         if len(cleaned) == 0 or cleaned[-1] != w:
@@ -104,49 +99,64 @@ def refine_caption(caption):
 
     sentence = " ".join(cleaned)
 
-    # grammar fixes
-    sentence = sentence.replace(" is ", " ")
-    sentence = sentence.replace(" are ", " ")
-    sentence = sentence.replace(" a a ", " a ")
-    sentence = sentence.replace(" the a ", " a ")
+    # fix grammar patterns
+    replacements = {
+        "a man is": "a man",
+        "a woman is": "a woman",
+        "a person is": "a person",
+        "is standing": "standing",
+        "is sitting": "sitting",
+        "is playing": "playing",
+        "is doing": "",
+        "are standing": "standing",
+        "are sitting": "sitting",
+        "on a a": "on a",
+        "in a a": "in a",
+    }
 
-    sentence = sentence.capitalize()
+    for k, v in replacements.items():
+        sentence = sentence.replace(k, v)
 
-    if not sentence.endswith("."):
-        sentence += "."
+    sentence = sentence.strip()
+
+    # fallback if too weak
+    if len(sentence.split()) < 3:
+        sentence = "An image showing something"
+
+    sentence = sentence.capitalize() + "."
 
     return sentence
 
 # =========================
-# EMOTION LOGIC
+# EMOTION DETECTION
 # =========================
-def refine_emotion(caption):
+def detect_emotion(caption):
     text = caption.lower()
 
     if any(w in text for w in ["smile", "laugh", "happy"]):
         return "happy"
-    elif any(w in text for w in ["run", "jump", "play", "skate"]):
+    elif any(w in text for w in ["run", "jump", "play", "skate", "ride"]):
         return "excited"
-    elif any(w in text for w in ["sit", "calm", "lake", "river"]):
+    elif any(w in text for w in ["sit", "calm", "lake", "river", "bench"]):
         return "peaceful"
     elif any(w in text for w in ["alone", "cry", "sad"]):
         return "sad"
 
-    return None
+    return "neutral"
 
 # =========================
-# EMOTION INJECTION
+# EMOTION INJECTION (SUBTLE)
 # =========================
 def inject_emotion(caption, emotion):
-    if emotion is None:
+    if emotion == "neutral":
         return caption
 
     if emotion == "excited":
         return caption.replace(".", " with excitement.")
     elif emotion == "happy":
-        return caption.replace(".", " with a happy mood.")
+        return caption.replace(".", " with a joyful mood.")
     elif emotion == "peaceful":
-        return caption.replace(".", " in a calm atmosphere.")
+        return caption.replace(".", " in a calm setting.")
     elif emotion == "sad":
         return caption.replace(".", " in a sad moment.")
 
@@ -218,8 +228,10 @@ if file:
         raw = generate_caption(img, encoder, decoder)
         refined = refine_caption(raw)
 
-        emotion = refine_emotion(refined)
+        emotion = detect_emotion(refined)
         final = inject_emotion(refined, emotion)
 
         st.success("Generated Caption:")
         st.write(final)
+
+        st.info(f"Predicted Emotion: {emotion}")
