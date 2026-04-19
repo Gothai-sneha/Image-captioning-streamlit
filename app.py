@@ -80,7 +80,7 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# CLEAN CAPTION (COLAB STYLE)
+# CLEAN CAPTION
 # =========================
 def clean_caption(caption):
     words = caption.split()
@@ -96,7 +96,7 @@ def clean_caption(caption):
     return caption
 
 # =========================
-# EMOTION FROM CAPTION (COLAB STYLE)
+# EMOTION FROM CAPTION
 # =========================
 def get_emotion_from_caption(caption):
     text = caption.lower()
@@ -119,27 +119,60 @@ def get_emotion_from_caption(caption):
     return "neutral"
 
 # =========================
-# ENRICH CAPTION (COLAB STYLE)
+# ENRICH CAPTION (FINAL STYLE)
 # =========================
 def enrich_caption_with_emotion(caption, emotion):
 
-    if emotion == "neutral":
-        return caption.capitalize() + "."
+    caption = caption.strip().lower()
 
-    words = caption.split()
+    if len(caption.split()) < 3:
+        return "An image showing something."
 
-    if len(words) == 0:
-        return "An image."
-
-    if words[0] in ["a", "an", "the"]:
-        enriched = f"{words[0]} {emotion} " + " ".join(words[1:])
+    # Grammar fix
+    if caption.startswith(("a ", "an ", "the ", "one ")):
+        sentence = caption.replace(" running", " is running") \
+                          .replace(" playing", " is playing") \
+                          .replace(" sitting", " is sitting") \
+                          .replace(" standing", " is standing")
     else:
-        enriched = f"{emotion} {caption}"
+        sentence = caption.replace(" running", " are running") \
+                          .replace(" playing", " are playing") \
+                          .replace(" sitting", " are sitting")
 
-    return enriched.capitalize() + "."
+    # Emotion → adverb
+    emotion_map = {
+        "happy": "happily",
+        "excited": "excitedly",
+        "playful": "playfully",
+        "peaceful": "peacefully",
+        "sad": "sadly",
+        "neutral": ""
+    }
+
+    emotion_word = emotion_map.get(emotion, "")
+
+    if emotion_word == "":
+        final = sentence
+    else:
+        if " is running" in sentence:
+            final = sentence.replace(" is running", f" is running {emotion_word}")
+        elif " are running" in sentence:
+            final = sentence.replace(" are running", f" are running {emotion_word}")
+        elif " is playing" in sentence:
+            final = sentence.replace(" is playing", f" is playing {emotion_word}")
+        elif " are playing" in sentence:
+            final = sentence.replace(" are playing", f" are playing {emotion_word}")
+        elif " is sitting" in sentence:
+            final = sentence.replace(" is sitting", f" is sitting {emotion_word}")
+        elif " are sitting" in sentence:
+            final = sentence.replace(" are sitting", f" are sitting {emotion_word}")
+        else:
+            final = sentence + f" {emotion_word}"
+
+    return final.capitalize().strip() + "."
 
 # =========================
-# BEAM SEARCH (SAME AS YOUR CODE)
+# BEAM SEARCH
 # =========================
 def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
     image = transform(image).unsqueeze(0).to(device)
@@ -214,4 +247,3 @@ if file:
         st.write(f'"{final_caption}"')
 
         st.info(f"Predicted Emotion: {emotion}")
-
