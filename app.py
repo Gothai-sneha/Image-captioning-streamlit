@@ -1,4 +1,3 @@
-
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -117,24 +116,27 @@ def refine_caption(caption):
     return sentence.strip().capitalize() + "."
 
 # =========================
-# EMOTION DETECTION
+# STRICT EMOTION DETECTION (FIXED)
 # =========================
 def detect_emotion(caption):
     text = caption.lower()
 
     if "smiling" in text or "laughing" in text:
         return "happy"
-    elif "running" in text or "playing" in text or "jumping" in text or "climbing" in text:
+
+    if "jumping high" in text or "celebrating" in text or "cheering" in text:
         return "excited"
-    elif "sitting" in text and ("lake" in text or "bench" in text):
+
+    if "sitting quietly" in text or ("sitting" in text and "lake" in text):
         return "peaceful"
-    elif "alone" in text:
+
+    if "crying" in text or "alone" in text:
         return "sad"
 
     return "neutral"
 
 # =========================
-# EMOTION INJECTION
+# SAFE EMOTION INJECTION (FIXED)
 # =========================
 def inject_emotion(caption, emotion):
     if emotion == "neutral":
@@ -142,18 +144,23 @@ def inject_emotion(caption, emotion):
 
     caption = caption.rstrip(".")
 
-    if " is running" in caption:
-        caption = caption.replace(" is running", f" is running {emotion}ly")
-    elif " are running" in caption:
-        caption = caption.replace(" are running", f" are running {emotion}ly")
-    elif " is playing" in caption:
-        caption = caption.replace(" is playing", f" is playing {emotion}ly")
-    elif " is jumping" in caption:
-        caption = caption.replace(" is jumping", f" is jumping {emotion}ly")
-    elif " is climbing" in caption:
-        caption = caption.replace(" is climbing", f" is climbing {emotion}ly")
-    else:
-        caption += f" {emotion}ly"
+    if emotion == "happy":
+        if " is " in caption:
+            caption = caption.replace(" is ", " is smiling and ", 1)
+
+    elif emotion == "excited":
+        if " is jumping" in caption:
+            caption = caption.replace(" is jumping", " is jumping excitedly")
+        elif " are jumping" in caption:
+            caption = caption.replace(" are jumping", " are jumping excitedly")
+
+    elif emotion == "peaceful":
+        if " is sitting" in caption:
+            caption = caption.replace(" is sitting", " is sitting peacefully")
+
+    elif emotion == "sad":
+        if " is " in caption:
+            caption = caption.replace(" is ", " is sadly ", 1)
 
     return caption + "."
 
@@ -226,4 +233,3 @@ if file:
         st.write(final)
 
         st.info(f"Predicted Emotion: {emotion}")
-
