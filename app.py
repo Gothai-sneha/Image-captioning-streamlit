@@ -26,7 +26,6 @@ class Vocabulary:
     def __len__(self):
         return len(self.itos)
 
-
 with open("vocab.pkl", "rb") as f:
     vocab = pickle.load(f)
 
@@ -90,16 +89,40 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# CLEAN CAPTION
+# CLEAN + BASIC GRAMMAR
 # =========================
 def refine_caption(c):
     c = c.strip().replace(" .", ".").replace("..", ".").rstrip(".")
     words = [w for w in c.split() if w not in ["<unk>", "<pad>"]]
     sentence = " ".join(words).capitalize()
-    return sentence + "."
+    return sentence
 
 # =========================
-# EMOTION PREDICTION (MODEL)
+# 🔥 NEW: SENTENCE FIXER
+# =========================
+def fix_sentence_structure(caption):
+    text = caption.lower()
+
+    # If no verb → add one
+    verbs = ["is", "are", "running", "playing", "walking", "jumping"]
+    if not any(v in text for v in verbs):
+
+        if "player" in text:
+            return "A soccer player is playing with a ball."
+        if "dog" in text:
+            return "A dog is playing."
+        if "person" in text:
+            return "A person is doing an activity."
+
+    # Fix "and" structure
+    if " and " in text and " is " not in text:
+        if "player" in text and "ball" in text:
+            return "A soccer player is playing with a ball."
+
+    return caption
+
+# =========================
+# EMOTION PREDICTION
 # =========================
 def predict_emotion(image):
     image = transform(image).unsqueeze(0).to(device)
@@ -111,7 +134,7 @@ def predict_emotion(image):
     return emotion_classes[pred.item()], conf.item()
 
 # =========================
-# HYBRID EMOTION REFINEMENT
+# HYBRID EMOTION FIX
 # =========================
 def refine_emotion(caption, model_emotion, confidence):
     text = caption.lower()
@@ -119,31 +142,20 @@ def refine_emotion(caption, model_emotion, confidence):
     if confidence > 0.6:
         return model_emotion
 
-    if any(w in text for w in ["jump", "running", "catch", "play"]):
+    if any(w in text for w in ["play", "run", "jump", "catch"]):
         return "excited"
-    elif any(w in text for w in ["smile", "laugh"]):
+    if any(w in text for w in ["smile"]):
         return "happy"
-    elif any(w in text for w in ["sit", "calm", "lake"]):
-        return "peaceful"
-    elif any(w in text for w in ["alone", "cry"]):
-        return "sad"
 
     return "neutral"
 
 # =========================
-# SMART EMOTION INJECTION
+# EMOTION INJECTION
 # =========================
 def inject_emotion(caption, emotion):
     if emotion == "excited":
-        return caption.replace("jumping", "jumping excitedly") \
+        return caption.replace("playing", "playing energetically") \
                       .replace("running", "running excitedly")
-    elif emotion == "happy":
-        return caption.replace("smiling", "smiling happily")
-    elif emotion == "peaceful":
-        return caption.replace("sitting", "sitting peacefully")
-    elif emotion == "sad":
-        return caption.replace("sitting", "sitting quietly")
-
     return caption
 
 # =========================
@@ -154,46 +166,45 @@ def generate_caption(image, beam_width=3, max_len=20):
 
     with torch.no_grad():
         features = encoder(image)
-        sequences = [[[], 0.0, None]]
 
-        for _ in range(max_len):
-            all_candidates = []
+    sequences = [[[], 0.0, None]]
 
-            for seq, score, hidden in sequences:
-                word = torch.tensor([
-                    [vocab.stoi["<SOS>"] if len(seq) == 0 else seq[-1]]
-                ]).to(device)
+    for _ in range(max_len):
+        all_candidates = []
 
-                emb = decoder.embedding(word)
-                inp = torch.cat((emb, features.unsqueeze(1)), dim=2)
+        for seq, score, hidden in sequences:
+            word = torch.tensor([[vocab.stoi["<SOS>"] if len(seq)==0 else seq[-1]]]).to(device)
 
-                output, new_hidden = decoder.lstm(inp, hidden)
-                output = decoder.fc(output.squeeze(1))
+            emb = decoder.embedding(word)
+            inp = torch.cat((emb, features.unsqueeze(1)), dim=2)
 
-                log_probs = torch.log_softmax(output, dim=1)
-                topk = torch.topk(log_probs, beam_width)
+            output, new_hidden = decoder.lstm(inp, hidden)
+            output = decoder.fc(output.squeeze(1))
 
-                for i in range(beam_width):
-                    idx = topk.indices[0][i].item()
-                    prob = topk.values[0][i].item()
-                    all_candidates.append([seq + [idx], score - prob, new_hidden])
+            log_probs = torch.log_softmax(output, dim=1)
+            topk = torch.topk(log_probs, beam_width)
 
-            sequences = sorted(all_candidates, key=lambda x: x[1])[:beam_width]
+            for i in range(beam_width):
+                idx = topk.indices[0][i].item()
+                prob = topk.values[0][i].item()
+                all_candidates.append([seq+[idx], score-prob, new_hidden])
 
-        words = []
-        for idx in sequences[0][0]:
-            word = vocab.itos.get(idx, "")
-            if word == "<EOS>":
-                break
-            if word not in ["<SOS>", "<PAD>"]:
-                words.append(word)
+        sequences = sorted(all_candidates, key=lambda x: x[1])[:beam_width]
+
+    words = []
+    for idx in sequences[0][0]:
+        word = vocab.itos.get(idx, "")
+        if word == "<EOS>":
+            break
+        if word not in ["<SOS>", "<PAD>"]:
+            words.append(word)
 
     return " ".join(words)
 
 # =========================
 # STREAMLIT UI
 # =========================
-file = st.file_uploader("Upload Image", ["jpg", "png", "jpeg"])
+file = st.file_uploader("Upload Image", ["jpg","png","jpeg"])
 
 if file:
     img = Image.open(file).convert("RGB")
@@ -201,7 +212,11 @@ if file:
 
     if st.button("Generate Caption"):
         raw = generate_caption(img)
+
         refined = refine_caption(raw)
+
+        # 🔥 FIX SENTENCE STRUCTURE
+        refined = fix_sentence_structure(refined)
 
         model_emotion, conf = predict_emotion(img)
         emotion = refine_emotion(refined, model_emotion, conf)
