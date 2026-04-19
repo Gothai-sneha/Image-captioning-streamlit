@@ -1,4 +1,3 @@
-
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -74,7 +73,6 @@ transform = transforms.Compose([
 # =========================
 def refine_caption(caption):
     caption = caption.lower().replace(".", "")
-
     words = [w for w in caption.split() if w not in ["<unk>", "<pad>", "<sos>"]]
 
     if not words:
@@ -87,71 +85,80 @@ def refine_caption(caption):
     for w in sentence.split():
         if not cleaned or cleaned[-1] != w:
             cleaned.append(w)
-
     sentence = " ".join(cleaned)
 
-    # detect verbs
     verbs = [
         "running", "playing", "sitting", "standing",
         "walking", "jumping", "catching", "holding",
-        "riding", "eating", "drinking"
+        "riding", "eating", "drinking", "climbing"
     ]
 
-    has_verb = any(v in sentence for v in verbs)
-
-    # add action only if missing
-    if not has_verb:
-        if "ball" in sentence or "frisbee" in sentence:
+    if not any(v in sentence for v in verbs):
+        if "ball" in sentence:
             sentence += " is playing"
         elif "dog" in sentence:
-            sentence += " is standing"
-        elif "person" in sentence or "man" in sentence or "woman" in sentence:
             sentence += " is standing"
         else:
             sentence += " is present"
 
-    # fix singular/plural grammar
+    # plural fix
     if sentence.startswith(("two ", "three ", "many ")):
         sentence = sentence.replace(" is ", " are ")
 
-    return sentence.strip().capitalize() + "."
+    return sentence.capitalize() + "."
 
 # =========================
-# EMOTION DETECTION
+# EMOTION DETECTION (BALANCED)
 # =========================
 def detect_emotion(caption):
     text = caption.lower()
 
     if "smiling" in text or "laughing" in text:
         return "happy"
-    elif "running" in text or "playing" in text or "jumping" in text:
-        return "excited"
-    elif "sitting" in text and ("lake" in text or "bench" in text):
+
+    if any(word in text for word in ["running", "playing", "jumping", "climbing"]):
+        if any(obj in text for obj in ["dog", "dogs", "children", "kids", "people", "boy", "girl"]):
+            return "excited"
+
+    if "sitting" in text and any(place in text for place in ["park", "bench", "tree", "lake"]):
         return "peaceful"
-    elif "alone" in text:
+
+    if "alone" in text:
         return "sad"
 
-    return None
+    return "neutral"
 
 # =========================
-# EMOTION INJECTION
+# NATURAL EMOTION INJECTION
 # =========================
 def inject_emotion(caption, emotion):
-    if emotion is None:
-        return caption
-
     caption = caption.rstrip(".")
 
-    if " is running" in caption:
-        caption = caption.replace(" is running", f" is running {emotion}ly")
-    elif " are running" in caption:
-        caption = caption.replace(" are running", f" are running {emotion}ly")
-    elif " is playing" in caption:
-        caption = caption.replace(" is playing", f" is playing {emotion}ly")
-    elif " is jumping" in caption:
-        caption = caption.replace(" is jumping", f" is jumping {emotion}ly")
-    else:
-        caption += f" {emotion}ly"
+    if emotion == "neutral":
+        return caption + "."
+
+    # excited → add at end (your style)
+    if emotion == "excited":
+        if any(v in caption for v in ["running", "playing", "jumping", "climbing"]):
+            return caption + " excitedly."
+
+    # peaceful
+    if emotion == "peaceful":
+        if " sitting" in caption:
+            caption = caption.replace(" sitting", " sitting peacefully")
+            return caption + "."
+
+    # happy
+    if emotion == "happy":
+        if " is " in caption:
+            caption = caption.replace(" is ", " is smiling and ", 1)
+            return caption + "."
+
+    # sad
+    if emotion == "sad":
+        if " is " in caption:
+            caption = caption.replace(" is ", " is sadly ", 1)
+            return caption + "."
 
     return caption + "."
 
@@ -223,6 +230,4 @@ if file:
         st.success("Generated Caption:")
         st.write(final)
 
-        if emotion:
-            st.info(f"Predicted Emotion: {emotion}")
-
+        st.info(f"Predicted Emotion: {emotion}")
