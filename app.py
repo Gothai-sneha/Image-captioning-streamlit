@@ -257,4 +257,3 @@ if file:
         st.write(f'"{final_caption}"')
 
         st.info(f"Predicted Emotion: {emotion}")
-
