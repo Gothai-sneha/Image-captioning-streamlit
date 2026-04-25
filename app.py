@@ -325,23 +325,50 @@ if file:
 
         # 🎨 OUTPUT CARD (REPLACED SUCCESS/INFO)
         st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.15);
-            padding: 20px;
-            border-radius: 15px;
-            margin-top: 20px;
-            box-shadow: 0px 4px 15px rgba(0,0,0,0.2);
+<div style="
+    background: rgba(255,255,255,0.12);
+    padding: 25px;
+    border-radius: 15px;
+    margin-top: 20px;
+    box-shadow: 0px 6px 20px rgba(0,0,0,0.25);
+">
+
+    <h2 style="
+        color:#ffd54f;
+        font-weight:bold;
+        margin-bottom:15px;
+    ">
+        Emotion Enriched Caption
+    </h2>
+
+    <div style="
+        background:white;
+        padding:15px;
+        border-radius:10px;
+        margin-bottom:15px;
+    ">
+        <span style="
+            color:black;
+            font-size:18px;
+            font-weight:bold;
         ">
-            <h3 style="color:#ffdd57;">Emotion Enriched Caption</h3>
+            "{final_caption}"
+        </span>
+    </div>
 
-            <p style="color:white;font-size:20px;font-weight:bold;">
-                "{final_caption}"
-            </p>
+    <div style="
+        background: rgba(0,255,204,0.15);
+        padding:10px;
+        border-radius:10px;
+    ">
+        <span style="
+            color:#00ffcc;
+            font-size:18px;
+            font-weight:bold;
+        ">
+            Predicted Emotion: {emotion} {emoji}
+        </span>
+    </div>
 
-            <hr>
-
-            <p style="color:#00ffcc;font-size:18px;font-weight:bold;">
-                Predicted Emotion: {emotion} {emoji}
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+</div>
+""", unsafe_allow_html=True)
