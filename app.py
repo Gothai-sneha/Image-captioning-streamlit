@@ -324,7 +324,7 @@ if file:
         emoji = emoji_map.get(emotion, "")
 
         # 🎨 OUTPUT CARD (REPLACED SUCCESS/INFO)
-        st.markdown(f"""
+       st.markdown(f"""
 <div style="
     background: rgba(255,255,255,0.12);
     padding: 25px;
@@ -352,7 +352,7 @@ if file:
             font-size:18px;
             font-weight:bold;
         ">
-            "{final_caption}"
+            {final_caption}
         </span>
     </div>
 
