@@ -47,27 +47,35 @@ h1 {
     padding: 10px 20px;
 }
 
-/* Caption text */
-.stMarkdown p {
-    font-size: 20px;
-    font-weight: bold;
+/* 🔥 MAKE ALL TEXT SAME FONT STYLE */
+body, p, div, span {
+    font-family: 'Segoe UI', sans-serif !important;
+    font-size: 20px !important;
+    font-weight: 600 !important;
     color: #2d2d2d !important;
-    background-color: rgba(255,255,255,0.85);
+}
+
+/* Caption (st.write) */
+.stMarkdown p {
+    background-color: rgba(255,255,255,0.9);
     padding: 12px;
     border-radius: 12px;
 }
 
-/* Alert boxes */
+/* SUCCESS BOX (Emotion Enriched Caption) */
 div[data-testid="stAlert"] {
     border-radius: 12px;
-    font-weight: bold;
+    font-size: 20px !important;
+    font-weight: 600 !important;
+    color: #2d2d2d !important;
 }
 
-/* Emotion box */
+/* INFO BOX (Predicted Emotion) */
 div[data-testid="stAlert"][data-baseweb="notification"] {
     background-color: #cdb4db !important;
+    font-size: 20px !important;
+    font-weight: 600 !important;
     color: #2d2d2d !important;
-    font-size: 18px;
 }
 
 </style>
