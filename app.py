@@ -12,7 +12,7 @@ import pickle
 st.set_page_config(page_title="Emotion Enriched Image Captioning")
 
 # =========================
-# 🎨 UI STYLING (ADDED ONLY)
+# 🎨 UI STYLING
 # =========================
 st.markdown("""
 <style>
@@ -201,13 +201,54 @@ def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
 
     with torch.no_grad():
         features = encoder(image)
-        return "two dogs are running in the grass"  # (kept same behavior placeholder)
+        sequences = [[[], 0.0, None]]
+
+        for _ in range(max_len):
+            all_candidates = []
+
+            for seq, score, hidden in sequences:
+
+                if len(seq) > 0 and seq[-1] == vocab.stoi["<EOS>"]:
+                    all_candidates.append([seq, score, hidden])
+                    continue
+
+                word = torch.tensor([
+                    [vocab.stoi["<SOS>"] if len(seq) == 0 else seq[-1]]
+                ]).to(device)
+
+                emb = decoder.embedding(word)
+                inp = torch.cat((emb, features.unsqueeze(1)), dim=2)
+
+                output, new_hidden = decoder.lstm(inp, hidden)
+                output = decoder.fc(output.squeeze(1))
+
+                log_probs = torch.log_softmax(output, dim=1)
+                topk = torch.topk(log_probs, beam_width)
+
+                for i in range(beam_width):
+                    idx = topk.indices[0][i].item()
+                    prob = topk.values[0][i].item()
+                    all_candidates.append([seq + [idx], score + prob, new_hidden])
+
+            sequences = sorted(
+                all_candidates,
+                key=lambda x: x[1] / len(x[0]),
+                reverse=True
+            )[:beam_width]
+
+        words = []
+        for idx in sequences[0][0]:
+            word = vocab.itos.get(idx, "")
+            if word == "<EOS>":
+                break
+            if word not in ["<SOS>", "<PAD>"]:
+                words.append(word)
+
+    return " ".join(words)
 
 # =========================
 # UI
 # =========================
-
-# 📁 Upload title
 st.markdown('<h3 style="color:white;">📁 Upload Image</h3>', unsafe_allow_html=True)
 
 file = st.file_uploader("", ["jpg", "png", "jpeg"])
@@ -235,37 +276,8 @@ if file:
 
         emoji = emoji_map.get(emotion, "")
 
-        # ✅ CLEAN OUTPUT BOX
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.12);
-            padding: 25px;
-            border-radius: 15px;
-            margin-top: 20px;
-        ">
-            <h2 style="color:#ffd54f;">
-                Emotion Enriched Caption
-            </h2>
+        # ✅ CLEAN OUTPUT (NO HTML BUG)
+        st.markdown("### 🟡 Emotion Enriched Caption")
+        st.info(final_caption)
 
-            <div style="
-                background:white;
-                padding:15px;
-                border-radius:10px;
-                margin-bottom:15px;
-            ">
-                <b style="color:black;font-size:18px;">
-                    {final_caption}
-                </b>
-            </div>
-
-            <div style="
-                background: rgba(0,255,204,0.15);
-                padding:10px;
-                border-radius:10px;
-            ">
-                <b style="color:#00ffcc;">
-                    Predicted Emotion: {emotion} {emoji}
-                </b>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.success(f"Predicted Emotion: {emotion} {emoji}")
