@@ -29,14 +29,6 @@ h1 {
     font-weight: bold;
 }
 
-/* Upload box */
-.stFileUploader > div {
-    background-color: rgba(255,255,255,0.5);
-    border: 2px dashed rgba(255,255,255,0.8);
-    border-radius: 12px;
-    padding: 10px;
-}
-
 /* Button */
 .stButton > button {
     background-color: #ff7eb3;
@@ -47,32 +39,43 @@ h1 {
     padding: 10px 20px;
 }
 
-/* Caption text */
+/* Upload box */
+.stFileUploader > div {
+    background-color: rgba(255,255,255,0.5);
+    border: 2px dashed rgba(255,255,255,0.8);
+    border-radius: 12px;
+    padding: 10px;
+}
+
+/* 🔥 SAME STYLE FOR ALL TEXT (FIX) */
+.stMarkdown p,
+div[data-testid="stAlert"] p,
+div[data-testid="stAlert"] div {
+    font-size: 20px !important;
+    font-weight: 700 !important;
+    color: #2d2d2d !important;
+}
+
+/* Caption box (white card) */
 .stMarkdown p {
-    font-size: 20px;
-    font-weight: bold;
-    color: #2d2d2d !important;
-    background-color: rgba(255,255,255,0.85);
-    padding: 12px;
-    border-radius: 12px;
+    background-color: rgba(255,255,255,0.95);
+    padding: 15px;
+    border-radius: 14px;
 }
 
-/* Alert boxes */
+/* SUCCESS BOX (Emotion Enriched Caption) */
 div[data-testid="stAlert"] {
-    border-radius: 12px;
-    font-weight: bold;
+    background-color: rgba(255,255,255,0.6) !important;
+    border-radius: 14px;
 }
 
-/* Emotion box */
+/* INFO BOX (Predicted Emotion) */
 div[data-testid="stAlert"][data-baseweb="notification"] {
-    background-color: #cdb4db !important;
-    color: #2d2d2d !important;
-    font-size: 18px;
+    background-color: rgba(255,255,255,0.6) !important;
 }
 
 </style>
 """, unsafe_allow_html=True)
-
 st.title("Emotion Enriched Image Captioning")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
