@@ -10,72 +10,6 @@ import pickle
 # PAGE CONFIG
 # =========================
 st.set_page_config(page_title="Emotion Enriched Image Captioning")
-
-# =========================
-# 🎨 PASTEL CSS (ONLY ADDITION)
-# =========================
-st.markdown("""
-<style>
-
-/* 🌸 Background */
-.stApp {
-    background: linear-gradient(to right, #a18cd1, #fbc2eb);
-}
-
-/* Title */
-h1 {
-    color: #2d2d2d;
-    text-align: center;
-    font-weight: bold;
-}
-
-/* Button */
-.stButton > button {
-    background-color: #ff7eb3;
-    color: white;
-    font-size: 18px;
-    font-weight: bold;
-    border-radius: 12px;
-    padding: 10px 20px;
-}
-
-/* Upload box */
-.stFileUploader > div {
-    background-color: rgba(255,255,255,0.5);
-    border: 2px dashed rgba(255,255,255,0.8);
-    border-radius: 12px;
-    padding: 10px;
-}
-
-/* 🔥 SAME STYLE FOR ALL TEXT (FIX) */
-.stMarkdown p,
-div[data-testid="stAlert"] p,
-div[data-testid="stAlert"] div {
-    font-size: 20px !important;
-    font-weight: 700 !important;
-    color: #2d2d2d !important;
-}
-
-/* Caption box (white card) */
-.stMarkdown p {
-    background-color: rgba(255,255,255,0.95);
-    padding: 15px;
-    border-radius: 14px;
-}
-
-/* SUCCESS BOX (Emotion Enriched Caption) */
-div[data-testid="stAlert"] {
-    background-color: rgba(255,255,255,0.6) !important;
-    border-radius: 14px;
-}
-
-/* INFO BOX (Predicted Emotion) */
-div[data-testid="stAlert"][data-baseweb="notification"] {
-    background-color: rgba(255,255,255,0.6) !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
 st.title("Emotion Enriched Image Captioning")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -171,18 +105,25 @@ def get_emotion_from_caption(caption):
 
     if any(w in text for w in ["smile", "laugh", "happy"]):
         return "happy"
+
     if any(w in text for w in ["run", "jump", "race"]):
         return "excited"
+
     if any(w in text for w in ["play", "child", "dog", "ball"]):
         return "playful"
+
     if any(w in text for w in ["sit", "bench", "lake"]):
         return "peaceful"
+
     if any(w in text for w in ["cry", "sad", "alone", "lonely"]):
         return "sad"
+
     if any(w in text for w in ["rest", "sleep", "lying", "exhausted", "tired"]):
         return "tired"
+
     if "group of people" in text:
         return "happy"
+
     if "people" in text and "standing" in text:
         return "happy"
 
@@ -200,6 +141,7 @@ def enrich_caption_with_emotion(caption, emotion):
 
     sentence = caption
 
+    # Grammar fix
     if " are " not in sentence:
         sentence = sentence.replace(" standing", " is standing") \
                            .replace(" running", " is running") \
@@ -207,9 +149,11 @@ def enrich_caption_with_emotion(caption, emotion):
                            .replace(" sitting", " is sitting") \
                            .replace(" lying", " is lying")
 
+    # Tired special case
     if emotion == "tired":
         return sentence.strip().rstrip(".").capitalize() + " looking tired."
 
+    # Emotion mapping
     emotion_map = {
         "happy": "happily",
         "excited": "excitedly",
@@ -245,7 +189,50 @@ def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
 
     with torch.no_grad():
         features = encoder(image)
-        return "two dogs are running in the grass"  # unchanged placeholder
+        sequences = [[[], 0.0, None]]
+
+        for _ in range(max_len):
+            all_candidates = []
+
+            for seq, score, hidden in sequences:
+
+                if len(seq) > 0 and seq[-1] == vocab.stoi["<EOS>"]:
+                    all_candidates.append([seq, score, hidden])
+                    continue
+
+                word = torch.tensor([
+                    [vocab.stoi["<SOS>"] if len(seq) == 0 else seq[-1]]
+                ]).to(device)
+
+                emb = decoder.embedding(word)
+                inp = torch.cat((emb, features.unsqueeze(1)), dim=2)
+
+                output, new_hidden = decoder.lstm(inp, hidden)
+                output = decoder.fc(output.squeeze(1))
+
+                log_probs = torch.log_softmax(output, dim=1)
+                topk = torch.topk(log_probs, beam_width)
+
+                for i in range(beam_width):
+                    idx = topk.indices[0][i].item()
+                    prob = topk.values[0][i].item()
+                    all_candidates.append([seq + [idx], score + prob, new_hidden])
+
+            sequences = sorted(
+                all_candidates,
+                key=lambda x: x[1] / len(x[0]),
+                reverse=True
+            )[:beam_width]
+
+        words = []
+        for idx in sequences[0][0]:
+            word = vocab.itos.get(idx, "")
+            if word == "<EOS>":
+                break
+            if word not in ["<SOS>", "<PAD>"]:
+                words.append(word)
+
+    return " ".join(words)
 
 # =========================
 # STREAMLIT UI
