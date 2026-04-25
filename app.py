@@ -19,7 +19,7 @@ st.markdown("""
 
 /* 🌸 Background */
 .stApp {
-   background: linear-gradient(to right, #f3e7e9, #e3eeff);
+   background: linear-gradient(to right, #b0bec5, #5c6bc0);
 }
 
 /* Title */
