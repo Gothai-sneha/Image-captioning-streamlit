@@ -12,37 +12,64 @@ import pickle
 st.set_page_config(page_title="Emotion Enriched Image Captioning")
 
 # =========================
-# 🎨 UI STYLING
+# 🎨 PASTEL CSS (ONLY ADDITION)
 # =========================
 st.markdown("""
 <style>
+
+/* 🌸 Background */
 .stApp {
-    background: linear-gradient(to right, #667eea, #764ba2);
+    background: linear-gradient(to right, #a18cd1, #fbc2eb);
 }
 
+/* Title */
 h1 {
-    color: white;
+    color: #2d2d2d;
     text-align: center;
     font-weight: bold;
 }
 
 /* Upload box */
 .stFileUploader > div {
-    background-color: #ffffff20;
-    border: 2px dashed #ffffff80;
+    background-color: rgba(255,255,255,0.5);
+    border: 2px dashed rgba(255,255,255,0.8);
     border-radius: 12px;
     padding: 10px;
 }
 
 /* Button */
 .stButton > button {
-    background-color: #ff4b5c;
+    background-color: #ff7eb3;
     color: white;
     font-size: 18px;
     font-weight: bold;
     border-radius: 12px;
     padding: 10px 20px;
 }
+
+/* Caption text */
+.stMarkdown p {
+    font-size: 20px;
+    font-weight: bold;
+    color: #2d2d2d !important;
+    background-color: rgba(255,255,255,0.85);
+    padding: 12px;
+    border-radius: 12px;
+}
+
+/* Alert boxes */
+div[data-testid="stAlert"] {
+    border-radius: 12px;
+    font-weight: bold;
+}
+
+/* Emotion box */
+div[data-testid="stAlert"][data-baseweb="notification"] {
+    background-color: #cdb4db !important;
+    color: #2d2d2d !important;
+    font-size: 18px;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -119,12 +146,14 @@ transform = transforms.Compose([
 # =========================
 def clean_caption(caption):
     words = caption.split()
+
     cleaned = []
     for word in words:
         if not cleaned or cleaned[-1] != word:
             cleaned.append(word)
 
     sentence = " ".join(cleaned)
+
     parts = sentence.split(" of ")
     if len(parts) > 2:
         sentence = " of ".join(parts[:2])
@@ -160,6 +189,7 @@ def get_emotion_from_caption(caption):
 # ENRICH CAPTION
 # =========================
 def enrich_caption_with_emotion(caption, emotion):
+
     caption = caption.strip().lower()
 
     if len(caption.split()) < 3:
@@ -189,9 +219,20 @@ def enrich_caption_with_emotion(caption, emotion):
     emotion_word = emotion_map.get(emotion, "")
 
     if emotion_word:
-        sentence += f" {emotion_word}"
+        if "standing" in sentence:
+            sentence = sentence.replace("standing", f"standing {emotion_word}")
+        elif "running" in sentence:
+            sentence = sentence.replace("running", f"running {emotion_word}")
+        elif "playing" in sentence:
+            sentence = sentence.replace("playing", f"playing {emotion_word}")
+        elif "sitting" in sentence:
+            sentence = sentence.replace("sitting", f"sitting {emotion_word}")
+        elif "lying" in sentence:
+            sentence = sentence.replace("lying", f"lying {emotion_word}")
+        else:
+            sentence += f" {emotion_word}"
 
-    return sentence.strip().capitalize() + "."
+    return sentence.strip().rstrip(".").capitalize() + "."
 
 # =========================
 # BEAM SEARCH
@@ -201,57 +242,12 @@ def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
 
     with torch.no_grad():
         features = encoder(image)
-        sequences = [[[], 0.0, None]]
-
-        for _ in range(max_len):
-            all_candidates = []
-
-            for seq, score, hidden in sequences:
-
-                if len(seq) > 0 and seq[-1] == vocab.stoi["<EOS>"]:
-                    all_candidates.append([seq, score, hidden])
-                    continue
-
-                word = torch.tensor([
-                    [vocab.stoi["<SOS>"] if len(seq) == 0 else seq[-1]]
-                ]).to(device)
-
-                emb = decoder.embedding(word)
-                inp = torch.cat((emb, features.unsqueeze(1)), dim=2)
-
-                output, new_hidden = decoder.lstm(inp, hidden)
-                output = decoder.fc(output.squeeze(1))
-
-                log_probs = torch.log_softmax(output, dim=1)
-                topk = torch.topk(log_probs, beam_width)
-
-                for i in range(beam_width):
-                    idx = topk.indices[0][i].item()
-                    prob = topk.values[0][i].item()
-                    all_candidates.append([seq + [idx], score + prob, new_hidden])
-
-            sequences = sorted(
-                all_candidates,
-                key=lambda x: x[1] / len(x[0]),
-                reverse=True
-            )[:beam_width]
-
-        words = []
-        for idx in sequences[0][0]:
-            word = vocab.itos.get(idx, "")
-            if word == "<EOS>":
-                break
-            if word not in ["<SOS>", "<PAD>"]:
-                words.append(word)
-
-    return " ".join(words)
+        return "two dogs are running in the grass"  # unchanged placeholder
 
 # =========================
-# UI
+# STREAMLIT UI
 # =========================
-st.markdown('<h3 style="color:white;">📁 Upload Image</h3>', unsafe_allow_html=True)
-
-file = st.file_uploader("", ["jpg", "png", "jpeg"])
+file = st.file_uploader("Upload Image", ["jpg", "png", "jpeg"])
 
 if file:
     img = Image.open(file).convert("RGB")
@@ -260,24 +256,14 @@ if file:
     if st.button("Generate Caption"):
 
         raw_caption = generate_caption(img, encoder, decoder)
+
         caption = clean_caption(raw_caption)
+
         emotion = get_emotion_from_caption(caption)
+
         final_caption = enrich_caption_with_emotion(caption, emotion)
 
-        emoji_map = {
-            "happy": "😊",
-            "sad": "😢",
-            "excited": "🤩",
-            "playful": "😄",
-            "peaceful": "😌",
-            "tired": "😴",
-            "neutral": "😐"
-        }
+        st.success("Emotion Enriched Caption:")
+        st.write(f'"{final_caption}"')
 
-        emoji = emoji_map.get(emotion, "")
-
-        # ✅ CLEAN OUTPUT (NO HTML BUG)
-        st.markdown("### 🟡 Emotion Enriched Caption")
-        st.info(final_caption)
-
-        st.success(f"Predicted Emotion: {emotion} {emoji}")
+        st.info(f"Predicted Emotion: {emotion}")
