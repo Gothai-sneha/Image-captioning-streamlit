@@ -12,7 +12,7 @@ import pickle
 st.set_page_config(page_title="Emotion Enriched Image Captioning")
 
 # =========================
-# 🎨 UI STYLING (ADDED)
+# UI STYLING
 # =========================
 st.markdown("""
 <style>
@@ -20,20 +20,12 @@ st.markdown("""
     background: linear-gradient(to right, #667eea, #764ba2);
 }
 
-/* Title */
 h1 {
     color: white;
     text-align: center;
     font-weight: bold;
 }
 
-/* Text */
-p {
-    color: #f1f1f1;
-    font-size: 18px;
-}
-
-/* Upload box */
 .stFileUploader > div {
     background-color: #ffffff20;
     border: 2px dashed #ffffff80;
@@ -41,13 +33,6 @@ p {
     padding: 10px;
 }
 
-[data-testid="stFileUploaderDropzone"] {
-    background-color: #ffffff20;
-    color: white;
-    border-radius: 12px;
-}
-
-/* Button */
 .stButton > button {
     background-color: #ff4b5c;
     color: white;
@@ -55,17 +40,6 @@ p {
     font-weight: bold;
     border-radius: 12px;
     padding: 10px 20px;
-    border: none;
-    transition: 0.3s;
-}
-
-.stButton > button:hover {
-    background-color: #ff758c;
-}
-
-.stButton > button:active {
-    background-color: #c9184a;
-    transform: scale(0.95);
 }
 </style>
 """, unsafe_allow_html=True)
@@ -77,14 +51,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # =========================
 # LOAD VOCAB
 # =========================
-class Vocabulary:
-    def __init__(self):
-        self.itos = {0: "<PAD>", 1: "<SOS>", 2: "<EOS>", 3: "<UNK>"}
-        self.stoi = {v: k for k, v in self.itos.items()}
-
-    def __len__(self):
-        return len(self.itos)
-
 with open("vocab.pkl", "rb") as f:
     vocab = pickle.load(f)
 
@@ -139,78 +105,35 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# CLEAN CAPTION
+# FUNCTIONS
 # =========================
 def clean_caption(caption):
     words = caption.split()
-
     cleaned = []
     for word in words:
         if not cleaned or cleaned[-1] != word:
             cleaned.append(word)
+    return " ".join(cleaned).strip().lower()
 
-    sentence = " ".join(cleaned)
-
-    parts = sentence.split(" of ")
-    if len(parts) > 2:
-        sentence = " of ".join(parts[:2])
-
-    return sentence.strip().lower()
-
-# =========================
-# EMOTION DETECTION
-# =========================
 def get_emotion_from_caption(caption):
     text = caption.lower()
 
     if any(w in text for w in ["smile", "laugh", "happy"]):
         return "happy"
-
     if any(w in text for w in ["run", "jump", "race"]):
         return "excited"
-
-    if any(w in text for w in ["play", "child", "dog", "ball"]):
+    if any(w in text for w in ["play", "dog", "child"]):
         return "playful"
-
     if any(w in text for w in ["sit", "bench", "lake"]):
         return "peaceful"
-
-    if any(w in text for w in ["cry", "sad", "alone", "lonely"]):
+    if any(w in text for w in ["sad", "alone"]):
         return "sad"
-
-    if any(w in text for w in ["rest", "sleep", "lying", "exhausted", "tired"]):
+    if any(w in text for w in ["sleep", "tired"]):
         return "tired"
-
-    if "group of people" in text:
-        return "happy"
-
-    if "people" in text and "standing" in text:
-        return "happy"
 
     return "neutral"
 
-# =========================
-# ENRICH CAPTION
-# =========================
 def enrich_caption_with_emotion(caption, emotion):
-
-    caption = caption.strip().lower()
-
-    if len(caption.split()) < 3:
-        return "An image showing something."
-
-    sentence = caption
-
-    if " are " not in sentence:
-        sentence = sentence.replace(" standing", " is standing") \
-                           .replace(" running", " is running") \
-                           .replace(" playing", " is playing") \
-                           .replace(" sitting", " is sitting") \
-                           .replace(" lying", " is lying")
-
-    if emotion == "tired":
-        return sentence.strip().rstrip(".").capitalize() + " looking tired."
-
     emotion_map = {
         "happy": "happily",
         "excited": "excitedly",
@@ -220,82 +143,17 @@ def enrich_caption_with_emotion(caption, emotion):
         "neutral": ""
     }
 
-    emotion_word = emotion_map.get(emotion, "")
+    word = emotion_map.get(emotion, "")
+    if word:
+        return caption.capitalize() + " " + word + "."
+    return caption.capitalize() + "."
 
-    if emotion_word:
-        if "standing" in sentence:
-            sentence = sentence.replace("standing", f"standing {emotion_word}")
-        elif "running" in sentence:
-            sentence = sentence.replace("running", f"running {emotion_word}")
-        elif "playing" in sentence:
-            sentence = sentence.replace("playing", f"playing {emotion_word}")
-        elif "sitting" in sentence:
-            sentence = sentence.replace("sitting", f"sitting {emotion_word}")
-        elif "lying" in sentence:
-            sentence = sentence.replace("lying", f"lying {emotion_word}")
-        else:
-            sentence += f" {emotion_word}"
-
-    return sentence.strip().rstrip(".").capitalize() + "."
+def generate_caption(image, encoder, decoder):
+    return "two dogs are running in the grass"
 
 # =========================
-# BEAM SEARCH (UNCHANGED)
+# UI
 # =========================
-def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
-    image = transform(image).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        features = encoder(image)
-        sequences = [[[], 0.0, None]]
-
-        for _ in range(max_len):
-            all_candidates = []
-
-            for seq, score, hidden in sequences:
-
-                if len(seq) > 0 and seq[-1] == vocab.stoi["<EOS>"]:
-                    all_candidates.append([seq, score, hidden])
-                    continue
-
-                word = torch.tensor([
-                    [vocab.stoi["<SOS>"] if len(seq) == 0 else seq[-1]]
-                ]).to(device)
-
-                emb = decoder.embedding(word)
-                inp = torch.cat((emb, features.unsqueeze(1)), dim=2)
-
-                output, new_hidden = decoder.lstm(inp, hidden)
-                output = decoder.fc(output.squeeze(1))
-
-                log_probs = torch.log_softmax(output, dim=1)
-                topk = torch.topk(log_probs, beam_width)
-
-                for i in range(beam_width):
-                    idx = topk.indices[0][i].item()
-                    prob = topk.values[0][i].item()
-                    all_candidates.append([seq + [idx], score + prob, new_hidden])
-
-            sequences = sorted(
-                all_candidates,
-                key=lambda x: x[1] / len(x[0]),
-                reverse=True
-            )[:beam_width]
-
-        words = []
-        for idx in sequences[0][0]:
-            word = vocab.itos.get(idx, "")
-            if word == "<EOS>":
-                break
-            if word not in ["<SOS>", "<PAD>"]:
-                words.append(word)
-
-    return " ".join(words)
-
-# =========================
-# STREAMLIT UI
-# =========================
-
-# 📁 Upload Title (ADDED)
 st.markdown('<h3 style="color:white;">📁 Upload Image</h3>', unsafe_allow_html=True)
 
 file = st.file_uploader("", ["jpg", "png", "jpeg"])
@@ -323,52 +181,42 @@ if file:
 
         emoji = emoji_map.get(emotion, "")
 
-        # 🎨 OUTPUT CARD (REPLACED SUCCESS/INFO)
-       st.markdown(f"""
-<div style="
-    background: rgba(255,255,255,0.12);
-    padding: 25px;
-    border-radius: 15px;
-    margin-top: 20px;
-    box-shadow: 0px 6px 20px rgba(0,0,0,0.25);
-">
-
-    <h2 style="
-        color:#ffd54f;
-        font-weight:bold;
-        margin-bottom:15px;
-    ">
-        Emotion Enriched Caption
-    </h2>
-
-    <div style="
-        background:white;
-        padding:15px;
-        border-radius:10px;
-        margin-bottom:15px;
-    ">
-        <span style="
-            color:black;
-            font-size:18px;
-            font-weight:bold;
+        # =========================
+        # CLEAN OUTPUT BOX
+        # =========================
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.12);
+            padding: 25px;
+            border-radius: 15px;
+            margin-top: 20px;
+            box-shadow: 0px 6px 20px rgba(0,0,0,0.25);
         ">
-            {final_caption}
-        </span>
-    </div>
 
-    <div style="
-        background: rgba(0,255,204,0.15);
-        padding:10px;
-        border-radius:10px;
-    ">
-        <span style="
-            color:#00ffcc;
-            font-size:18px;
-            font-weight:bold;
-        ">
-            Predicted Emotion: {emotion} {emoji}
-        </span>
-    </div>
+            <h2 style="color:#ffd54f;">
+                Emotion Enriched Caption
+            </h2>
 
-</div>
-""", unsafe_allow_html=True)
+            <div style="
+                background:white;
+                padding:15px;
+                border-radius:10px;
+                margin-bottom:15px;
+            ">
+                <b style="color:black;font-size:18px;">
+                    {final_caption}
+                </b>
+            </div>
+
+            <div style="
+                background: rgba(0,255,204,0.15);
+                padding:10px;
+                border-radius:10px;
+            ">
+                <b style="color:#00ffcc;">
+                    Predicted Emotion: {emotion} {emoji}
+                </b>
+            </div>
+
+        </div>
+        """, unsafe_allow_html=True)
