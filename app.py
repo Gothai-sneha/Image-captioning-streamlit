@@ -12,77 +12,62 @@ import pickle
 st.set_page_config(page_title="Emotion Enriched Image Captioning")
 
 # =========================
-# 🎨 CUSTOM UI STYLING
+# 🎨 UI STYLING (ADDED)
 # =========================
 st.markdown("""
-    <style>
-    .stApp {
-        background: linear-gradient(to right, #667eea, #764ba2);
-    }
+<style>
+.stApp {
+    background: linear-gradient(to right, #667eea, #764ba2);
+}
 
-    /* Title */
-    h1 {
-        color: #ffffff;
-        text-align: center;
-        font-weight: bold;
-    }
+/* Title */
+h1 {
+    color: white;
+    text-align: center;
+    font-weight: bold;
+}
 
-    /* Subheaders */
-    h2, h3 {
-        color: #ffdd57;
-        font-weight: bold;
-    }
+/* Text */
+p {
+    color: #f1f1f1;
+    font-size: 18px;
+}
 
-    /* Normal text */
-    p {
-        color: #f1f1f1;
-        font-size: 18px;
-    }
+/* Upload box */
+.stFileUploader > div {
+    background-color: #ffffff20;
+    border: 2px dashed #ffffff80;
+    border-radius: 12px;
+    padding: 10px;
+}
 
-    /* File uploader text */
-    .stFileUploader label {
-        color: white;
-        font-weight: bold;
-    }
+[data-testid="stFileUploaderDropzone"] {
+    background-color: #ffffff20;
+    color: white;
+    border-radius: 12px;
+}
 
-    /* Button styling */
-    .stButton > button {
-        background-color: #ff4b5c;
-        color: white;
-        font-size: 18px;
-        font-weight: bold;
-        border-radius: 12px;
-        padding: 10px 20px;
-        border: none;
-        transition: 0.3s;
-    }
+/* Button */
+.stButton > button {
+    background-color: #ff4b5c;
+    color: white;
+    font-size: 18px;
+    font-weight: bold;
+    border-radius: 12px;
+    padding: 10px 20px;
+    border: none;
+    transition: 0.3s;
+}
 
-    /* Hover */
-    .stButton > button:hover {
-        background-color: #ff758c;
-        color: white;
-    }
+.stButton > button:hover {
+    background-color: #ff758c;
+}
 
-    /* Click */
-    .stButton > button:active {
-        background-color: #c9184a;
-        transform: scale(0.95);
-    }
-
-    /* Success box */
-    .stSuccess {
-        background-color: #2ecc71 !important;
-        color: white !important;
-        font-weight: bold;
-    }
-
-    /* Info box */
-    .stInfo {
-        background-color: #3498db !important;
-        color: white !important;
-        font-weight: bold;
-    }
-    </style>
+.stButton > button:active {
+    background-color: #c9184a;
+    transform: scale(0.95);
+}
+</style>
 """, unsafe_allow_html=True)
 
 st.title("Emotion Enriched Image Captioning")
@@ -158,8 +143,8 @@ transform = transforms.Compose([
 # =========================
 def clean_caption(caption):
     words = caption.split()
-    cleaned = []
 
+    cleaned = []
     for word in words:
         if not cleaned or cleaned[-1] != word:
             cleaned.append(word)
@@ -180,19 +165,25 @@ def get_emotion_from_caption(caption):
 
     if any(w in text for w in ["smile", "laugh", "happy"]):
         return "happy"
+
     if any(w in text for w in ["run", "jump", "race"]):
         return "excited"
+
     if any(w in text for w in ["play", "child", "dog", "ball"]):
         return "playful"
+
     if any(w in text for w in ["sit", "bench", "lake"]):
         return "peaceful"
+
     if any(w in text for w in ["cry", "sad", "alone", "lonely"]):
         return "sad"
+
     if any(w in text for w in ["rest", "sleep", "lying", "exhausted", "tired"]):
         return "tired"
 
     if "group of people" in text:
         return "happy"
+
     if "people" in text and "standing" in text:
         return "happy"
 
@@ -202,6 +193,7 @@ def get_emotion_from_caption(caption):
 # ENRICH CAPTION
 # =========================
 def enrich_caption_with_emotion(caption, emotion):
+
     caption = caption.strip().lower()
 
     if len(caption.split()) < 3:
@@ -247,7 +239,7 @@ def enrich_caption_with_emotion(caption, emotion):
     return sentence.strip().rstrip(".").capitalize() + "."
 
 # =========================
-# BEAM SEARCH
+# BEAM SEARCH (UNCHANGED)
 # =========================
 def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
     image = transform(image).unsqueeze(0).to(device)
@@ -260,6 +252,7 @@ def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
             all_candidates = []
 
             for seq, score, hidden in sequences:
+
                 if len(seq) > 0 and seq[-1] == vocab.stoi["<EOS>"]:
                     all_candidates.append([seq, score, hidden])
                     continue
@@ -301,19 +294,54 @@ def generate_caption(image, encoder, decoder, beam_width=3, max_len=20):
 # =========================
 # STREAMLIT UI
 # =========================
-file = st.file_uploader("Upload Image", ["jpg", "png", "jpeg"])
+
+# 📁 Upload Title (ADDED)
+st.markdown('<h3 style="color:white;">📁 Upload Image</h3>', unsafe_allow_html=True)
+
+file = st.file_uploader("", ["jpg", "png", "jpeg"])
 
 if file:
     img = Image.open(file).convert("RGB")
     st.image(img, use_container_width=True)
 
     if st.button("Generate Caption"):
+
         raw_caption = generate_caption(img, encoder, decoder)
         caption = clean_caption(raw_caption)
         emotion = get_emotion_from_caption(caption)
         final_caption = enrich_caption_with_emotion(caption, emotion)
 
-        st.success("Emotion Enriched Caption:")
-        st.write(f'"{final_caption}"')
+        emoji_map = {
+            "happy": "😊",
+            "sad": "😢",
+            "excited": "🤩",
+            "playful": "😄",
+            "peaceful": "😌",
+            "tired": "😴",
+            "neutral": "😐"
+        }
 
-        st.info(f"Predicted Emotion: {emotion}")
+        emoji = emoji_map.get(emotion, "")
+
+        # 🎨 OUTPUT CARD (REPLACED SUCCESS/INFO)
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.15);
+            padding: 20px;
+            border-radius: 15px;
+            margin-top: 20px;
+            box-shadow: 0px 4px 15px rgba(0,0,0,0.2);
+        ">
+            <h3 style="color:#ffdd57;">Emotion Enriched Caption</h3>
+
+            <p style="color:white;font-size:20px;font-weight:bold;">
+                "{final_caption}"
+            </p>
+
+            <hr>
+
+            <p style="color:#00ffcc;font-size:18px;font-weight:bold;">
+                Predicted Emotion: {emotion} {emoji}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
