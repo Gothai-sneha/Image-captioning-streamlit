@@ -52,7 +52,7 @@ h1 {
 div[data-testid="stAlert"] p,
 div[data-testid="stAlert"] div {
     font-size: 20px !important;
-    font-weight: 700 !important;
+    font-weight: 400 !important;
     color: #2d2d2d !important;
 }
 
