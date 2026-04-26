@@ -10,6 +10,73 @@ import pickle
 # PAGE CONFIG
 # =========================
 st.set_page_config(page_title="Emotion Enriched Image Captioning")
+
+# =========================
+# 🎨 FINAL CSS (PASTEL + FONT FIX)
+# =========================
+st.markdown("""
+<style>
+
+/* 🌸 Background */
+.stApp {
+  background: linear-gradient(to right, #cfd9df, #8ca6db);
+}
+
+/* Title */
+h1 {
+    color: #2d2d2d;
+    text-align: center;
+    font-weight: bold;
+}
+
+/* Button */
+.stButton > button {
+    background-color: #ff7eb3;
+    color: white;
+    font-size: 18px;
+    font-weight: bold;
+    border-radius: 12px;
+    padding: 10px 20px;
+}
+
+/* Upload box */
+.stFileUploader > div {
+    background-color: rgba(255,255,255,0.5);
+    border: 2px dashed rgba(255,255,255,0.8);
+    border-radius: 12px;
+    padding: 10px;
+}
+
+/* 🔥 SAME FONT STYLE EVERYWHERE */
+.stMarkdown p,
+div[data-testid="stAlert"] p,
+div[data-testid="stAlert"] div {
+    font-size: 20px !important;
+    font-weight: 400 !important;
+    color: #2d2d2d !important;
+}
+
+/* Caption box */
+.stMarkdown p {
+    background-color: rgba(255,255,255,0.95);
+    padding: 15px;
+    border-radius: 14px;
+}
+
+/* Success box (Emotion Enriched Caption) */
+div[data-testid="stAlert"] {
+    background-color: rgba(255,255,255,0.6) !important;
+    border-radius: 14px;
+}
+
+/* Info box (Predicted Emotion) */
+div[data-testid="stAlert"][data-baseweb="notification"] {
+    background-color: rgba(255,255,255,0.6) !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
 st.title("Emotion Enriched Image Captioning")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -141,7 +208,6 @@ def enrich_caption_with_emotion(caption, emotion):
 
     sentence = caption
 
-    # Grammar fix
     if " are " not in sentence:
         sentence = sentence.replace(" standing", " is standing") \
                            .replace(" running", " is running") \
@@ -149,11 +215,9 @@ def enrich_caption_with_emotion(caption, emotion):
                            .replace(" sitting", " is sitting") \
                            .replace(" lying", " is lying")
 
-    # Tired special case
     if emotion == "tired":
         return sentence.strip().rstrip(".").capitalize() + " looking tired."
 
-    # Emotion mapping
     emotion_map = {
         "happy": "happily",
         "excited": "excitedly",
